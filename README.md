@@ -23,4 +23,4 @@ php artisan test
 python -m unittest discover -s python/tests
 ```
 
-See `docs/` for the data contract, evaluation protocol, and server setup.
+See [docs/modeling.md](docs/modeling.md) for the model form, evaluation gates, and the current training command.
