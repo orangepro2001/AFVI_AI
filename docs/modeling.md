@@ -2,9 +2,11 @@
 
 ## 当前产物
 
-首版不是一条参数曲线，也不是自动调机。它从 PxSpecTool 解析出的结构化特征中学习一个低容量、强正则化的逻辑回归函数，对已经检出的 merge point 计算历史 VRS 不良风险分，并按分数排序供人工复核。当前只使用 log1p(area_total)、log1p(length_max) 和 log1p(width_max) 三个特征；图片只通过已有 manifest 建立引用，不读取图像像素。
+模型不是参数曲线，也不是自动调机。它从 PxSpecTool 解析出的结构化字段学习一个岭回归逻辑回归，对已经检出的 merge point 计算历史 VRS 不良风险分，并按分数排序供人工复核。图片只通过已有 manifest 建立引用，不读取图像像素。
 
-形式上，模型先用训练 LOT 的统计量标准化特征，再计算 score = sigmoid(intercept + coefficients · features)。这些系数描述历史点级标签的排序关系，不是设备参数的最优值。VRS 中非零 ivs_1 是正例；0/空值仅作为低可信假设良品，并做权重敏感性检查；无 VRS rewrite 和标签冲突不参与拟合。
+特征集事先固定为两组：size3 = log1p(area_total、length_max、width_max)；structured = size3 + log1p(area_max) + is_dummy + side、def_side、light_id、channel_idx、sr_metal 的 one-hot（类别取值只从训练行学习）。坐标和 pc_idx 不进入模型。使用 --tune 时，只在训练 LOT 内做 5 折 LOT 分组交叉验证，在 {size3, structured} × L2 {2.0, 0.1, 0.01, 0.001} 中按平均折 ROC-AUC 选择，再在全部训练 LOT 上重拟合，对留出 LOT 只评一次。求解器为带回溯的 Newton 法。
+
+形式上，模型先用训练 LOT 的统计量标准化特征，再计算 score = sigmoid(intercept + coefficients · features)。这些系数描述历史点级标签的排序关系，不是设备参数的最优值。VRS 中非零 ivs_1 是正例；0/空值仅作为低可信假设良品，并做权重敏感性检查；无 VRS rewrite 和标签冲突不参与拟合。报告同时给出固定参照 log1p(area_total) 的留出 AUC、模型与参照的配对 LOT bootstrap 差值区间，以及按机台和型号的留出表现。
 
 ## 小样本保护
 
@@ -12,21 +14,45 @@
 
 达不到门槛时，系统仍可生成探索性排序，但会标为 exploratory_only，不显示泛化指标。达到门槛也只说明对独立历史 LOT 的 VRS 判定有评估结果，不代表生产召回率，不代表模型能发现 AFVI 完全漏检的缺陷，也不构成参数优化结论。
 
-## 现有样本状态
+## 现有样本状态（2026-11-06）
 
-当前已验证的真实导出包含 26,757 个点，但都属于同一个 LOT。它可用于检查解析、标签、manifest join 和探索性拟合；由于只有一个独立 LOT，不能用于跨 LOT 验证。随着数据积累，先看独立 LOT 数及各 LOT 的标签分布，再看点数。
+ResultData/Data/{AFVI13,AFVI14} 下按 model/LOT/group 有限层级盘点出 228 个生产组（排除名称含 TEST、DRY-RUN 的型号或 LOT），其中 185 组成功只读导出，共 11,878,219 个点、74 个 LOT，62 个 LOT 有 VRS 标签，59 个含正例。缺 Bundle001.ini 的组被跳过。
 
-## 训练命令
+按 2026-08-15T00:00:00+09:00 切分（另随机留出 20% 早期 LOT）：34 个训练 LOT、28 个留出 LOT。第一次（冻结 size3、L2 2.0）留出 AUC 0.518，不合格。第二次（训练 LOT 交叉验证选出 structured、L2 0.001）留出 AUC 0.655（LOT bootstrap 95% 0.565–0.711），参照 0.560，配对差值 −0.005 至 +0.162。第二次是同一留出集的第二次使用。
 
-下面的示例在 AI 服务器读取现有解析导出和 JPG manifest。它不会遍历 BMP，不读取 JPG 内容，也不会写入 ResultData、设备参数或正式数据库。报告输出到仓库之外：
+## 运行步骤
+
+以下命令在 AI 服务器运行，输入均为只读挂载，输出都在仓库之外：
 
     AFVI_DATA_HOME=/home/tony/afvi-ai-data
-    PYTHONPATH=python python3 -m afvi_ai.train \
-      --input /tmp/afvi-real-group-v2.jsonl \
-      --output "$AFVI_DATA_HOME/reports/latest.json" \
-      --cutoff 2026-10-01T00:00:00+09:00 \
-      --manifest /var/lib/pximages/192.168.1.203/manifest.jsonl \
-      --jpg-root /var/lib/pximages \
-      --image-label 192.168.1.203
+    RESULT_DATA=/srv/pxshares/192.168.1.203/pixel/ResultData/Data
 
-这里使用的单 LOT 示例只生成探索性报告。正式跨 LOT 评估要等到训练与留出时间段中都有足够独立 LOT，并满足上述每类覆盖门槛。参数回放仍需先证明固定帧、规格和参数可以复现设备输出。
+    # 1. 有限层级盘点（不进入 strip 目录内部）
+    PYTHONPATH=python python3 -m afvi_ai.inventory \
+      --data-root "$RESULT_DATA" --output "$AFVI_DATA_HOME/inventory/groups.jsonl"
+
+    # 2. 逐组导出（可续跑：已存在的非空文件会跳过）
+    go build -mod=mod -o "$AFVI_DATA_HOME/bin/afvi-export" ./cmd/afvi-export
+    python3 -c 'import json,sys
+    for l in open(sys.argv[1]):
+        r = json.loads(l); print(r["machine"], r["group_rel"], r["group_dir"], sep="\t")' \
+      "$AFVI_DATA_HOME/inventory/groups.jsonl" |
+    while IFS="$(printf '\t')" read -r machine rel dir; do
+      out="$AFVI_DATA_HOME/exports/$machine/$rel.jsonl"
+      [ -s "$out" ] && continue
+      mkdir -p "$(dirname "$out")"
+      "$AFVI_DATA_HOME/bin/afvi-export" -machine "$machine" -group-rel "$rel" -group-dir "$dir" > "$out.part" \
+        && mv "$out.part" "$out" || { rm -f "$out.part"; echo "FAIL $machine $rel" >&2; }
+    done
+
+    # 3. 只看标签与时间的覆盖表，先定 cutoff，再训练
+    PYTHONPATH=python python3 -m afvi_ai.coverage --input "$AFVI_DATA_HOME/exports" \
+      --output "$AFVI_DATA_HOME/inventory/coverage.json" --cutoff 2026-08-15T00:00:00+09:00
+
+    # 4. 训练与评估（每个 LOT×标签状态抽样 1,500 行并按全量回权）
+    PYTHONPATH=python python3 -m afvi_ai.train --input "$AFVI_DATA_HOME/exports" \
+      --output "$AFVI_DATA_HOME/reports/latest.json" --cutoff 2026-08-15T00:00:00+09:00 \
+      --max-rows-per-lot-state 1500 --max-rows 400000 --seed 0 --tune --tuning-workers 8 \
+      --holdout-note "说明该留出集此前被评估过几次"
+
+本次实际导出目录是 $AFVI_DATA_HOME/exports-20261106-all，训练输入为只含生产组的符号链接目录 exports-20261106-production。达到门槛只说明对独立历史 LOT 的 VRS 判定有评估结果，不代表生产召回率，也不构成参数优化结论。参数回放仍需先证明固定帧、规格和参数可以复现设备输出。

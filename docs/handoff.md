@@ -2,38 +2,41 @@
 
 Updated: 2026-11-06
 
-## Stable baseline
+## Current state
 
-The latest stable source baseline is commit bccb57a on main (dashboard), following exporter 85ee21d and conservative Python baseline bd56e9b. This is a read-only research prototype for ranking AFVI merge points that already exist in ResultData. It does not detect points AFVI missed, write parameters, or recommend production settings.
+A read-only research prototype ranks AFVI merge points that already exist in ResultData by historical VRS-rewrite risk. It does not detect points AFVI missed, write parameters, or recommend production settings.
 
-The Go adapter reads ResultData through the existing PxSpecTool/result package. Python joins the existing JPG manifest and trains a low-capacity, LOT-balanced, regularized logistic model on three structured measurements. It does not enumerate BMP files or read image pixels. Laravel displays the external JSON report and binds to the AI server loopback address.
+The Go adapter (cmd/afvi-export) reads ResultData through the sibling PxSpecTool/result package. Python (stdlib only) inventories groups, audits label coverage, samples per (LOT, label state), and fits a LOT-balanced ridge logistic model. Laravel displays the external JSON report; the preview container binds 127.0.0.1:18000 and is published on the tailnet at https://tony-ai-pc-1.tail9f7f1f.ts.net/afvi_ai.
 
-## Current evidence
+## Data
 
-The AI server is reachable with ssh AI. The current /home/tony/afvi-ai-data/reports/latest.json was produced from one result group and contains 26,757 merge points: 1,976 keyed non-zero VRS codes, 24,046 low-confidence assumed-good points, and 735 unlabeled points. The points belong to one physical LOT. Consequently the report is insufficient_support / exploratory_only, has no holdout metrics, and marks all 2,000 displayed scores as in-sample exploratory scores.
+- Inventory of ResultData/Data/{AFVI13,AFVI14} (bounded to model/LOT/group): 228 production groups after excluding TEST and DRY-RUN names. 185 exported read-only to /home/tony/afvi-ai-data/exports-20261106-all; the training input is the symlink directory exports-20261106-production. 39 groups lacked Bundle001.ini and were skipped.
+- 11,878,219 merge points, 74 LOTs, 62 with VRS labels, 59 with positives (about 168k positives, 5.0M assumed-good).
+- The PxTemporary shares (.61/.62/.63) have no LOT identity and are not used. No BMP or JPG pixels were read.
 
-The existing JPG manifest lists 374,325 images across six groups: four groups under 25FBO015-15/D07834026H3112 and groups named TEST3 and TEST4. A read-only audit export of those groups contains 129,140 merge points (about 74 MB) in /home/tony/afvi-ai-data/exports-afvi13-20261106/all.jsonl. The four groups for the same physical LOT contain 88,410 points, including 5,926 keyed positives, 76,179 assumed-good points, and 6,305 unlabeled points. The two TEST-named groups contain 40,730 unlabeled points and no VRS rewrites. Their production identity is unverified, so they are not evidence for supervised validation. This audit export has not been used to generate a new model report.
+## Evaluation (pre-registered in .planning findings)
 
-Formal historical evaluation remains unavailable. The evaluator requires at least five independent LOTs in each split and each label class represented in at least three LOTs per split; larger point counts within one LOT do not satisfy this requirement. Even a passing report would describe historical VRS-label generalization only, not production recall or parameter improvement.
+Split: cutoff 2026-08-15T00:00:00+09:00 plus a seeded 20% of earlier LOTs; 34 training LOTs and 28 held-out LOTs. Qualified means: evaluated / validated_candidate, held-out LOT-bootstrap ROC-AUC lower bound above 0.5, and held-out ROC-AUC above the fixed log1p(area_total) reference.
 
-## Run and verify
+- Round 1, frozen size3 features with L2 2.0: held-out ROC-AUC 0.518 (0.479–0.551). Not qualified; the L2 setting from the one-LOT era shrank the model to near-constant. Report: reports/multilot-20261106.json.
+- Round 2, settings chosen by 5-fold LOT-grouped CV on training LOTs only (structured features, L2 0.001; CV mean 0.736): held-out ROC-AUC 0.655 (0.565–0.711), AP 0.613; reference 0.560; paired model minus reference difference −0.005 to +0.162. Meets the pre-registered criteria. Report: reports/multilot-tuned-20261106.json, also latest.json.
 
-From the AI server, the last report can be regenerated from the existing single-group export using the command in docs/modeling.md. Inputs are read-only; reports and exports stay under /home/tony/afvi-ai-data, outside Git. The web preview is loopback-only; use ssh -L 18000:127.0.0.1:18000 AI and open http://127.0.0.1:18000 when the preview container is running.
-
-Verified at handoff:
-
-- Python unit suite: 30 tests passed locally against the committed source.
-- Go exporter tests: passed on AI with go test -mod=mod ./cmd/afvi-export.
-- The report schema and support state were inspected on AI; report remains one-LOT exploratory-only.
-- Six manifest-listed groups were exported read-only through the Go adapter. No BMP or JPG pixel data was read.
-- AI server and local repository are to be left on the same pushed commit with clean source worktrees. Runtime data, .env, installed dependencies, and server-preserved Git stashes are host-local and are not source files to overwrite.
+Caveats: round 2 is the second use of the same held-out LOTs (selection itself used only training LOTs). The advantage over area-only ranking is not significant at 95%. CV chose the smallest L2 at the grid edge. The held-out score is lower than CV (0.655 vs 0.736). Performance is strong on the 7M99, 24FBO060-19, 24MSP037-15 and 25FBO015-15 families (0.79–0.87) and near random on 4SP0223G01 (0.50) and 6ST2001Q01 (0.54).
 
 ## Next work
 
-Wait for more independently labeled production LOTs or a user-identified existing index of such LOTs. Then inventory only an explicit group list, verify VRS class coverage per physical LOT, and batch-export those groups outside Git. Do not repeat the broad CIFS walk; the previous recursive VRS filename scan exceeded 100 seconds. Before calling an evaluation formal, verify both split support gates and inspect performance by machine/model/material/side/light/channel where those fields are available.
+1. Confirm on production LOTs inspected after 2026-11-06: inventory and export only new groups, then score them with the round-2 settings unchanged. That is the first fully unseen test.
+2. Investigate the weak B-series models (4SP0223G01, 6ST2001Q01) on training LOTs only. Possible causes are label semantics, missing fields, or the need for image information.
+3. Keep image work and label assistance (for example multimodal review) as a separate, approved phase. It needs a decision on whether factory images may leave the network.
 
-Keep the model small and frozen while data is scarce. Do not add image models, broaden feature searches, or tune hyperparameters against the same held-out LOTs. Parameter replay remains a separate gate: it must reproduce the machine's output for the same frame, mask, spec, and parameters before parameter comparisons can be trusted.
+Run commands are in docs/modeling.md. Parameter replay remains a separate gate: it must reproduce the machine's output for the same frame, mask, spec, and parameters before parameter comparisons can be trusted.
+
+## Verification at handoff
+
+- Python unit suite: 42 tests passed.
+- Laravel suite in the composer:2 container (PHP 8.5): 6 tests passed; Pint clean.
+- Go exporter built with go build -mod=mod; the export of 185 groups is logged in exports-20261106-all/export.log.
 
 ## Source synchronization
 
-Treat /mnt/c/dev/AFVI_AI and ~/dev/AFVI_AI on ssh AI as one source checkout. Every accepted milestone is committed and pushed to origin/main, then the AI checkout is advanced to that exact commit. Verify git rev-parse HEAD, branch, and git status --short on both sides after each sync. GitHub SSH authentication is unavailable from AI, so transfer pushed commits with a local Git bundle when needed. Preserve the server's existing stashes and host-specific runtime files.
+This host (tony-ai-pc-1) is the AI server, and ~/dev/AFVI_AI is the working checkout. Every accepted milestone is committed and pushed to origin/main. Runtime data, .env, and installed dependencies stay outside Git.

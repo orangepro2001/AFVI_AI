@@ -4,10 +4,10 @@
 Stabilize and document the read-only AFVI point-risk prototype, verify its limits against the AI server's actual indexed data, and leave local and AI source checkouts synchronized.
 
 ## Next Step
-[Wait for additional independently labeled production LOTs or a user-identified index; then run an explicit-list coverage audit before any cross-LOT evaluation.]
+[Confirm the round-2 model on production LOTs inspected after 2026-11-06 with settings unchanged; investigate weak B-series models on training LOTs only.]
 
 ## Current Phase
-Complete: stable baseline and handoff
+Complete: multi-LOT evaluation; round 2 meets pre-registered criteria (held-out ROC-AUC 0.655, 0.565-0.711)
 
 ## Phases
 

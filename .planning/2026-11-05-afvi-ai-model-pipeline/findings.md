@@ -48,3 +48,11 @@ Obtain or identify more independently labeled production LOTs. First audit their
 - Model selection uses training LOTs only: 5-fold LOT-grouped CV (folds by seeded LOT hash), metric mean fold ROC-AUC with equal class-by-LOT weights.
 - Grid: feature set {size3, structured} x L2 {2.0, 0.1, 0.01, 0.001}. structured = log1p(area_total, length_max, width_max, area_max) + is_dummy + one-hot side, def_side, light_id, channel_idx, sr_metal (levels learned from training rows). Coordinates and pc_idx are excluded.
 - Highest mean CV AUC wins (ties to the simpler, earlier grid entry); the winner is refit on all training LOTs and scored once on the holdout.
+
+## Round 2 result (2026-11-06)
+
+- CV on training LOTs (mean fold ROC-AUC): size3 0.582/0.656/0.664/0.660 and structured 0.634/0.663/0.700/0.736 for L2 2.0/0.1/0.01/0.001. Chosen: structured, L2 0.001 (grid edge).
+- Held-out (28 LOTs, second evaluation): ROC-AUC 0.655 (LOT bootstrap 95% 0.565-0.711), AP 0.613 (0.550-0.664). Reference log1p(area_total) 0.560; paired difference -0.005 to +0.162.
+- Verdict: meets the pre-registered criteria (lower bound above 0.5; point estimate above the reference). The advantage over the reference is not significant at 95%, and the holdout was used twice, so it is a development-qualified candidate pending confirmation on new LOTs.
+- Held-out by machine: AFVI13 0.667 (reference 0.567), AFVI14 0.637 (0.552). By model: 7M99-593 0.855, 24FBO060-19 0.872, 25FBO015-15 0.843, 24MSP037-15 0.817, 7M99-535 0.813, 7M99-586 0.793, 22SIP015-07 0.795; 6AN0921I01 0.600, 7M99-631 0.600, 6ST2001Q01 0.537, 4SP0223G01 0.498.
+- Largest coefficients (standardized): area_total +1.32, light_id=2 +1.10, sr_metal=2 +1.06 vs sr_metal=1, length_max -1.01, width_max +0.98, area_max -0.96, is_dummy -0.52. side and def_side carry the same information.

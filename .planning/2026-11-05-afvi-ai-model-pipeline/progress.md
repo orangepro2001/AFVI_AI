@@ -61,3 +61,16 @@
 | Python unit suite at handoff | 30 passed |
 | Go exporter tests on AI | go test -mod=mod ./cmd/afvi-export passed |
 | Explicit manifest group export | 129,140 rows across six groups; only one labeled physical LOT |
+
+## Session: 2026-11-06 (multi-LOT)
+
+- Found about 116 candidate LOTs by bounded listing of ResultData/Data; added inventory and coverage tools, per-(LOT, state) reservoir sampling with weights, a fixed area-only reference with paired bootstrap, and a per-machine/model breakdown.
+- Exported 185 production groups (11.88M points, 74 LOTs). Pre-registered the cutoff and criteria before scoring.
+- Round 1 (frozen) was not qualified: 0.518. The user approved round 2 on the same holdout. CV-tuned structured model: held-out 0.655 (0.565-0.711), meeting the criteria with the caveats recorded in findings.
+- Dashboard published by the user at https://tony-ai-pc-1.tail9f7f1f.ts.net/afvi_ai (tailscale serve path /afvi_ai -> 127.0.0.1:18000).
+
+| Check | Result |
+|-------|--------|
+| Python unit suite | 42 passed |
+| Laravel suite (composer:2, PHP 8.5) | 6 passed, 39 assertions; Pint passed |
+| Round-2 report on dashboard via tailnet domain | AUC 0.655 and holdout history shown |
