@@ -32,3 +32,11 @@ Obtain or identify more independently labeled production LOTs. First audit their
 - Frozen split: cutoff 2026-08-15T00:00:00+09:00, test_fraction 0.2, seed 0. Before cutoff 48 LOTs (39 with positives); after cutoff 26 LOTs (20 with positives).
 - Frozen model: structured-logistic-v2, three log1p features, L2 2.0, negative weight 0.25; sampling 1,500 rows per (LOT, label state), re-weighted to full totals.
 - Qualified means: evaluation status evaluated and model status validated_candidate; held-out LOT-bootstrap ROC-AUC 95% lower bound > 0.5; held-out ROC-AUC above the fixed log1p(area_total) reference, reported with a paired LOT-bootstrap difference interval. The split and model are not changed after seeing held-out results.
+
+## Multi-LOT evaluation result (2026-11-06) — not qualified
+
+- Report: /home/tony/afvi-ai-data/reports/multilot-20261106.json (also latest.json). Input 11,878,219 rows from 185 groups; 266,461 kept by per-(LOT, state) sampling.
+- Status evaluated / validated_candidate: 34 training LOTs, 28 held-out LOTs (positives in 32 / 27).
+- Held-out ROC-AUC 0.518 (LOT bootstrap 95% 0.479–0.551); AP 0.505. Reference log1p(area_total) ROC-AUC 0.560; paired model−reference difference −0.105 to +0.023.
+- Verdict against pre-registered criteria: not qualified (lower bound not above 0.5, does not beat the reference).
+- Diagnosis: coefficients are near zero (area 0.0013, length −0.021, width −0.006). L2 strength 2.0 on a per-LOT-normalized mean loss was sized for one LOT and shrinks the model to a near-constant. This held-out set has now been looked at once.
