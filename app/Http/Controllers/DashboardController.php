@@ -90,6 +90,7 @@ class DashboardController extends Controller
         $evaluation['bootstrap'] = is_array($evaluation['bootstrap'] ?? null) ? $evaluation['bootstrap'] : [];
         $evaluation['sensitivity'] = is_array($evaluation['sensitivity'] ?? null) ? $evaluation['sensitivity'] : [];
         $evaluation['reference'] = is_array($evaluation['reference'] ?? null) ? $evaluation['reference'] : null;
+        $evaluation['review_curve'] = $this->reviewCurve($evaluation['review_curve'] ?? null);
         $breakdown = is_array($evaluation['breakdown'] ?? null) ? $evaluation['breakdown'] : [];
         $evaluation['breakdown'] = [
             'machine' => $this->breakdownRows($breakdown['machine'] ?? null),
@@ -123,7 +124,7 @@ class DashboardController extends Controller
     }
 
     /**
-     * @return list<array{name: string, rows: int, lots: int, model_roc_auc: ?float, reference_roc_auc: ?float}>
+     * @return list<array{name: string, rows: int, lots: int, model_roc_auc: ?float, reference_roc_auc: ?float, model_recall_at_30: ?float, reference_recall_at_30: ?float}>
      */
     private function breakdownRows(mixed $value): array
     {
@@ -142,6 +143,34 @@ class DashboardController extends Controller
                 'lots' => $this->count($entry['lots'] ?? null),
                 'model_roc_auc' => is_numeric($entry['model_roc_auc'] ?? null) ? (float) $entry['model_roc_auc'] : null,
                 'reference_roc_auc' => is_numeric($entry['reference_roc_auc'] ?? null) ? (float) $entry['reference_roc_auc'] : null,
+                'model_recall_at_30' => is_numeric($entry['model_recall_at_30'] ?? null) ? (float) $entry['model_recall_at_30'] : null,
+                'reference_recall_at_30' => is_numeric($entry['reference_recall_at_30'] ?? null) ? (float) $entry['reference_recall_at_30'] : null,
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @return list<array{fraction: float, model: ?float, reference: ?float}>
+     */
+    private function reviewCurve(mixed $value): array
+    {
+        if (! is_array($value) || ! is_array($value['fractions'] ?? null)) {
+            return [];
+        }
+
+        $model = is_array($value['model'] ?? null) ? $value['model'] : [];
+        $reference = is_array($value['reference'] ?? null) ? $value['reference'] : [];
+        $rows = [];
+        foreach (array_slice($value['fractions'], 0, 10) as $index => $fraction) {
+            if (! is_numeric($fraction)) {
+                continue;
+            }
+            $rows[] = [
+                'fraction' => (float) $fraction,
+                'model' => is_numeric($model[$index] ?? null) ? (float) $model[$index] : null,
+                'reference' => is_numeric($reference[$index] ?? null) ? (float) $reference[$index] : null,
             ];
         }
 

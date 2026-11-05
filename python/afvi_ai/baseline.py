@@ -21,6 +21,7 @@ L2_GRID = (2.0, 0.1, 0.01, 0.001)
 TUNING_FOLDS = 5
 MAX_CATEGORY_LEVELS = 20
 MAX_NEWTON_ITERATIONS = 60
+REVIEW_FRACTIONS = (0.1, 0.2, 0.3, 0.5)
 MIN_TRAIN_LOTS = 5
 MIN_TEST_LOTS = 5
 MIN_CLASS_ROWS = 20
@@ -136,6 +137,7 @@ def build_report(
     bootstrap: dict[str, object] | None = None
     reference: dict[str, object] | None = None
     breakdown: dict[str, list[dict[str, object]]] | None = None
+    review_curve: dict[str, object] | None = None
     if evaluated and model is not None:
         scored_test = [(row, model.score(row)) for row in split_test]
         usable_scores = [(row, score) for row, score in scored_test if score is not None]
@@ -160,6 +162,13 @@ def build_report(
         breakdown = {
             "machine": _breakdown(paired, lambda row: row.key.machine),
             "model": _breakdown(paired, lambda row: row.key.result_group.split("/", 1)[0]),
+        }
+        review_curve = {
+            "fractions": list(REVIEW_FRACTIONS),
+            "model": review_recall([(row, score) for row, score, _ in paired]),
+            "reference": review_recall([(row, ref) for row, _, ref in paired]),
+            "random": list(REVIEW_FRACTIONS),
+            "definition": "Within each held-out LOT, review the highest-scoring fraction of reviewed points (sampling-weighted); share of that LOT's keyed VRS points found, averaged over LOTs with keyed points.",
         }
 
     sensitivity: dict[str, object] = {
@@ -233,6 +242,7 @@ def build_report(
         "bootstrap": bootstrap,
         "reference": reference,
         "breakdown": breakdown,
+        "review_curve": review_curve,
         "holdout_history": holdout_history,
         "label_basis": "Historical VRS rewrite: keyed non-zero ivs_1 positive; zero/empty assumed good with low confidence; absent rewrites and conflicts excluded.",
         "policy": {
@@ -624,6 +634,42 @@ def reference_score(sample: Sample) -> float | None:
     return None if raw is None else raw[0]
 
 
+def review_recall(
+    rows: Sequence[tuple[Sample, float]], fractions: Sequence[float] = REVIEW_FRACTIONS
+) -> list[float | None]:
+    """LOT-averaged share of keyed points found when reviewing the top fraction of each LOT.
+
+    Rows carry sampling weights, so fractions refer to the LOT's full reviewed population.
+    Tied scores share the review budget proportionally.
+    """
+    by_lot: dict[str, list[tuple[Sample, float]]] = defaultdict(list)
+    for item in rows:
+        by_lot[item[0].lot].append(item)
+    per_fraction: list[list[float]] = [[] for _ in fractions]
+    for items in by_lot.values():
+        positive_total = sum(row.weight for row, _ in items if row.label == 1)
+        total = sum(row.weight for row, _ in items)
+        if positive_total <= 0 or total <= 0:
+            continue
+        groups: dict[float, list[float]] = defaultdict(lambda: [0.0, 0.0])
+        for row, score in items:
+            cell = groups[score]
+            cell[0] += row.weight
+            cell[1] += row.weight if row.label == 1 else 0.0
+        ordered = [groups[score] for score in sorted(groups, reverse=True)]
+        for index, fraction in enumerate(fractions):
+            budget = fraction * total
+            found = 0.0
+            for weight, positive in ordered:
+                if budget <= 0:
+                    break
+                taken = min(weight, budget)
+                found += positive * taken / weight
+                budget -= taken
+            per_fraction[index].append(found / positive_total)
+    return [sum(values) / len(values) if values else None for values in per_fraction]
+
+
 def _weighted_count(samples: Iterable[Sample]) -> int:
     return round(sum(row.weight for row in samples))
 
@@ -645,10 +691,14 @@ def _breakdown(
             "class_lots": lots_by_class,
             "model_roc_auc": None,
             "reference_roc_auc": None,
+            "model_recall_at_30": None,
+            "reference_recall_at_30": None,
         }
         if min(lots_by_class.values()) > 0:
             entry["model_roc_auc"] = _weighted_metrics([(row, score) for row, score, _ in items])["roc_auc"]
             entry["reference_roc_auc"] = _weighted_metrics([(row, ref) for row, _, ref in items])["roc_auc"]
+            entry["model_recall_at_30"] = review_recall([(row, score) for row, score, _ in items], (0.3,))[0]
+            entry["reference_recall_at_30"] = review_recall([(row, ref) for row, _, ref in items], (0.3,))[0]
         result.append(entry)
     return result
 

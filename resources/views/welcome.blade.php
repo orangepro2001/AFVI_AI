@@ -203,12 +203,27 @@
             </section>
         </div>
 
+        @php
+            $formatShare = fn ($value) => is_numeric($value) ? number_format((float) $value * 100, 1).'%' : '—';
+        @endphp
+        @if (! empty($evaluation['review_curve']))
+            <section class="panel" style="margin-top:16px">
+                <div class="panel-head"><h2>按风险分复核的覆盖率</h2><span class="panel-kicker">留出 LOT · 每个 LOT 内按分数从高到低复核</span></div>
+                <div class="panel-body">
+                    <div class="data-line"><span>复核前</span><strong>找到的 VRS 打码点：模型 / 仅面积 / 随机</strong></div>
+                    @foreach ($evaluation['review_curve'] as $point)
+                        <div class="data-line"><span class="mono">{{ number_format($point['fraction'] * 100, 0) }}%</span><strong>{{ $formatShare($point['model']) }} / {{ $formatShare($point['reference']) }} / {{ $formatShare($point['fraction']) }}</strong></div>
+                    @endforeach
+                </div>
+            </section>
+        @endif
+
         @if (! empty($evaluation['breakdown']['model']))
             <section class="panel" style="margin-top:16px">
-                <div class="panel-head"><h2>留出 LOT 分型号表现</h2><span class="panel-kicker">模型 / 参照 ROC AUC</span></div>
+                <div class="panel-head"><h2>留出 LOT 分型号表现</h2><span class="panel-kicker">ROC AUC 模型 / 参照 · 复核前 30% 找到的打码点</span></div>
                 <div class="panel-body">
                     @foreach ($evaluation['breakdown']['model'] as $entry)
-                        <div class="data-line"><span class="mono">{{ $entry['name'] }} · {{ number_format($entry['rows']) }} 点 / {{ $entry['lots'] }} LOT</span><strong>{{ $formatAuc($entry['model_roc_auc']) }} / {{ $formatAuc($entry['reference_roc_auc']) }}</strong></div>
+                        <div class="data-line"><span class="mono">{{ $entry['name'] }} · {{ number_format($entry['rows']) }} 点 / {{ $entry['lots'] }} LOT</span><strong>{{ $formatAuc($entry['model_roc_auc']) }} / {{ $formatAuc($entry['reference_roc_auc']) }} · {{ $formatShare($entry['model_recall_at_30']) }}</strong></div>
                     @endforeach
                 </div>
             </section>

@@ -159,7 +159,13 @@ class DashboardTest extends TestCase
                     'paired_bootstrap' => ['roc_auc_difference' => ['low' => 0.041, 'high' => 0.212]],
                 ],
                 'breakdown' => [
-                    'model' => [['name' => '7M99-586', 'rows' => 1200, 'lots' => 4, 'model_roc_auc' => 0.801, 'reference_roc_auc' => 0.702]],
+                    'model' => [['name' => '7M99-586', 'rows' => 1200, 'lots' => 4, 'model_roc_auc' => 0.801, 'reference_roc_auc' => 0.702, 'model_recall_at_30' => 0.612]],
+                ],
+                'review_curve' => [
+                    'fractions' => [0.1, 0.3],
+                    'model' => [0.254, 0.583],
+                    'reference' => [0.141, 0.402],
+                    'random' => [0.1, 0.3],
                 ],
             ],
             'model' => [
@@ -191,7 +197,10 @@ class DashboardTest extends TestCase
             ->assertSee('0.655')
             ->assertSee('0.041 - 0.212')
             ->assertSee('7M99-586')
-            ->assertSee('0.801 / 0.702')
+            ->assertSee('0.801 / 0.702 · 61.2%')
+            ->assertSee('按风险分复核的覆盖率')
+            ->assertSee('25.4% / 14.1% / 10.0%')
+            ->assertSee('58.3% / 40.2% / 30.0%')
             ->assertSee('留出集使用记录：Second evaluation of this held-out LOT set.')
             ->assertSee('特征集 structured · L2 0.01 · 由训练 LOT 分组交叉验证选定');
 

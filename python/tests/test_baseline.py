@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from afvi_ai.baseline import (
     DEFAULT_NEGATIVE_WEIGHT,
     STRUCTURED,
+    review_recall,
     _weighted_metrics,
     build_report,
     fit_logistic,
@@ -257,6 +258,33 @@ class BaselineReportTests(unittest.TestCase):
         self.assertIsNone(report["model"]["selection"])
         self.assertEqual(report["model"]["feature_set"], "size3")
         self.assertEqual(report["model"]["l2_strength"], 2.0)
+
+    def test_review_recall_uses_weights_ties_and_lot_averaging(self):
+        rows = self.make_samples(2, points_per_lot=4)
+        lot_a = [row for row in rows if row.lot == "LOT-000"]
+        lot_b = [row for row in rows if row.lot == "LOT-001"]
+        scored = []
+        for row in lot_a:
+            scored.append((row, 1.0 if row.label == 1 else 0.0))
+        for row in lot_b:
+            scored.append((replace(row, weight=3.0) if row.label == 0 else row, 0.5))
+
+        recall = review_recall(scored, (0.25, 0.5, 1.0))
+
+        self.assertAlmostEqual(recall[0], (0.5 + 0.25) / 2)
+        self.assertAlmostEqual(recall[1], (1.0 + 0.5) / 2)
+        self.assertAlmostEqual(recall[2], 1.0)
+
+    def test_evaluated_report_includes_review_curve(self):
+        report = build_report(
+            self.make_samples(20, points_per_lot=50), cutoff=self.cutoff, data_source={"export": "fixture.jsonl"}
+        )
+
+        curve = report["evaluation"]["review_curve"]
+        self.assertEqual(curve["fractions"], [0.1, 0.2, 0.3, 0.5])
+        self.assertAlmostEqual(curve["model"][2], 0.6)
+        self.assertEqual(curve["random"], [0.1, 0.2, 0.3, 0.5])
+        self.assertIn("model_recall_at_30", report["evaluation"]["breakdown"]["model"][0])
 
     def test_report_is_strict_json_serializable(self):
         report = build_report(
