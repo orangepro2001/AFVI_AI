@@ -74,3 +74,9 @@
 | Python unit suite | 42 passed |
 | Laravel suite (composer:2, PHP 8.5) | 6 passed, 39 assertions; Pint passed |
 | Round-2 report on dashboard via tailnet domain | AUC 0.655 and holdout history shown |
+
+## Session: 2026-11-06 (usable outputs)
+
+- Added a LOT-averaged review coverage curve (descriptive; no selection) and per-family recall at 30%. A rerun reproduced the round-2 metrics exactly. Held-out: top 30% finds 57.5% of keyed points (area-only 38.8%, random 30%).
+- Added afvi_ai.confirm (frozen-model verdict on unseen LOTs) and afvi_ai.score (per-LOT review CSV with image path, saved-image check, and family evidence).
+- Demo review lists in /home/tony/afvi-ai-data/review-demo/out. Python 51 tests and Laravel 6 tests passed.

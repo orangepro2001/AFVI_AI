@@ -27,6 +27,13 @@ Caveats: round 2 is the second use of the same held-out LOTs (selection itself u
 
 The round-2 settings were refit on all 62 labeled LOTs and saved as /home/tony/afvi-ai-data/models/afvi-risk-v3-20261106.json via train --final-model. A rerun of the round-2 command reproduced the report exactly. python -m afvi_ai.confirm scores only LOTs absent from the artifact's training_lots, applies the same gates, and returns the pre-registered verdict. A smoke test on a seen LOT correctly refused a verdict. On 2026-11-06 a fresh inventory found no new groups (the newest data is from 2026-11-02), so confirmation waits for new production.
 
+## Usable outputs
+
+- Model: /home/tony/afvi-ai-data/models/afvi-risk-v3-20261106.json (structured, L2 0.001, refit on 62 labeled LOTs; metadata carries per-family held-out evidence).
+- Review coverage on held-out LOTs, LOT-averaged share of keyed VRS points found when reviewing each LOT's top fraction by score: top 10% 27.5%, top 20% 43.1%, top 30% 57.5%, top 50% 74.8%. Area-only ranking gives 13.3% / 25.9% / 38.8% / 61.8%; random order gives the fraction itself. At the top 30%, the validated families reach 77–88% (7M99-535/586/593, 24FBO060-19, 24MSP037-15, 25FBO015-15); B-series reaches 25–44%.
+- Review lists: python -m afvi_ai.score writes one ranked CSV per LOT plus summary.json. Demo output for RH6268036400- (7M99-535, part of the final model's training data) and MGP363046700E (SPFCE300N4.KMA0, a family the model never saw) is in /home/tony/afvi-ai-data/review-demo/out. Only about 1–2% of the top 500 points in these LOTs have a saved defect image; the inspection program does not save every image.
+- Dashboard: https://tony-ai-pc-1.tail9f7f1f.ts.net/afvi_ai shows the evaluation, the review coverage table, and per-family results.
+
 ## Label findings
 
 - ivs_1 is the operator's key-in code at the review station; "0" means nothing was keyed (PxSpecTool docs/result-data/50-ivs-keyin.md).
@@ -44,8 +51,8 @@ Run commands are in docs/modeling.md. Parameter replay remains a separate gate: 
 
 ## Verification at handoff
 
-- Python unit suite: 47 tests passed.
-- Laravel suite in the composer:2 container (PHP 8.5): 6 tests passed; Pint clean.
+- Python unit suite: 51 tests passed.
+- Laravel suite in the composer:2 container (PHP 8.5): 6 tests passed (42 assertions); Pint clean.
 - Go exporter built with go build -mod=mod; the export of 185 groups is logged in exports-20261106-all/export.log.
 
 ## Source synchronization

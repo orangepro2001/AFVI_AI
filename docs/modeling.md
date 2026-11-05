@@ -65,6 +65,17 @@ ResultData/Data/{AFVI13,AFVI14} 下按 model/LOT/group 有限层级盘点出 228
 
 确认不重拟合；模型训练集中出现过的 LOT 会被剔除。新 LOT 需满足与留出集相同的门槛（至少 5 个 LOT，两类各至少 3 个 LOT、20 行），合格判定沿用事先登记的标准：LOT bootstrap 下界 > 0.5，且点估计高于 log1p(area_total) 参照。
 
+## 复核清单
+
+    PYTHONPATH=python python3 -m afvi_ai.score \
+      --model "$AFVI_DATA_HOME/models/afvi-risk-v3-20261106.json" \
+      --input "$AFVI_DATA_HOME/exports-new" --output-dir "$AFVI_DATA_HOME/review/<date>" \
+      --share-root /srv/pxshares/192.168.1.203/pixel --check-images 500
+
+每个 LOT 输出一份 CSV（风险从高到低）：排名、分数、所在前百分比、strip/side/unit/merge 定位、ResultData 中的缺陷图相对路径、前 N 个点的图是否实际保存（只 stat，不读像素）、已有 VRS 码，以及该型号族在留出评估中的 AUC 和前 30% 覆盖率。summary.json 标出训练中没出现过或没有留出证据的型号族。分数是复核优先级，不是判定结果或设备参数。
+
+留出 LOT 上按每个 LOT 内分数从高到低复核时，找到的 VRS 打码点比例（LOT 平均）：前 10% 27.5%，前 20% 43.1%，前 30% 57.5%，前 50% 74.8%；仅按面积排序为 13.3%/25.9%/38.8%/61.8%，随机为 10%/20%/30%/50%。前 30% 在 7M99-535/586/593、24FBO060-19、24MSP037-15、25FBO015-15 上为 77%–88%，在 B 系（4SP0223G01、6ST2001Q01、6AN0921I01）上为 25%–44%。
+
 ## 标签语义
 
 ivs_1 是复核站人工键入码（见 PxSpecTool docs/result-data/50-ivs-keyin.md），"0" 表示未键入。ResultData/DLG 列出的是送复核的条带，不是深度学习抽样；在已复核条带内，列表内外的键入率相近（3.8% 与 4.4%）。码表按型号族配置：7M99 系为字母码，FBO/MSP 系为 3–4 位数字，B 系（4SP0223G01、3HN1008O01、6AN0921I01、6ST2001Q01）为 6 位数字（450xxx/850xxx/880xxx/150xxx）。码含义不在 ResultData 中；各族码频次表在 $AFVI_DATA_HOME/inventory/vrs-codes-by-family.csv，留有含义和是否真实不良两列待品质部门填写。B 系在训练 LOT 交叉验证中同样表现弱，标签定义是首要怀疑对象。
