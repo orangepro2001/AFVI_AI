@@ -24,3 +24,11 @@
 ## Remaining gate
 
 Obtain or identify more independently labeled production LOTs. First audit their explicit group list and class coverage. Only then export the required groups, run the frozen evaluation policy, and review support and uncertainty. Parameter replay requires a separate same-frame reproducibility proof.
+
+## Multi-LOT evaluation pre-registration (2026-11-06, fixed before any scoring)
+
+- Inventory: bounded listing of ResultData/Data/{AFVI13,AFVI14} found 228 production groups after excluding TEST/DRY-RUN names. Export: 185 groups exported read-only; 39 groups lacked Bundle001.ini and DRY-RUN groups had no strip XML.
+- Coverage (labels and timestamps only): 74 LOTs, 62 with VRS labels, 59 with positives; about 168k positives and 5.0M assumed-good points.
+- Frozen split: cutoff 2026-08-15T00:00:00+09:00, test_fraction 0.2, seed 0. Before cutoff 48 LOTs (39 with positives); after cutoff 26 LOTs (20 with positives).
+- Frozen model: structured-logistic-v2, three log1p features, L2 2.0, negative weight 0.25; sampling 1,500 rows per (LOT, label state), re-weighted to full totals.
+- Qualified means: evaluation status evaluated and model status validated_candidate; held-out LOT-bootstrap ROC-AUC 95% lower bound > 0.5; held-out ROC-AUC above the fixed log1p(area_total) reference, reported with a paired LOT-bootstrap difference interval. The split and model are not changed after seeing held-out results.
