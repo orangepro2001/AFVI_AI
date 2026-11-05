@@ -23,17 +23,28 @@ Split: cutoff 2026-08-15T00:00:00+09:00 plus a seeded 20% of earlier LOTs; 34 tr
 
 Caveats: round 2 is the second use of the same held-out LOTs (selection itself used only training LOTs). The advantage over area-only ranking is not significant at 95%. CV chose the smallest L2 at the grid edge. The held-out score is lower than CV (0.655 vs 0.736). Performance is strong on the 7M99, 24FBO060-19, 24MSP037-15 and 25FBO015-15 families (0.79–0.87) and near random on 4SP0223G01 (0.50) and 6ST2001Q01 (0.54).
 
+## Frozen model and confirmation
+
+The round-2 settings were refit on all 62 labeled LOTs and saved as /home/tony/afvi-ai-data/models/afvi-risk-v3-20261106.json via train --final-model. A rerun of the round-2 command reproduced the report exactly. python -m afvi_ai.confirm scores only LOTs absent from the artifact's training_lots, applies the same gates, and returns the pre-registered verdict. A smoke test on a seen LOT correctly refused a verdict. On 2026-11-06 a fresh inventory found no new groups (the newest data is from 2026-11-02), so confirmation waits for new production.
+
+## Label findings
+
+- ivs_1 is the operator's key-in code at the review station; "0" means nothing was keyed (PxSpecTool docs/result-data/50-ivs-keyin.md).
+- ResultData/DLG lists the strips sent to review, not a deep-learning subsample. Inside reviewed strips, the keying rate is the same on and off the list (3.8% vs 4.4%).
+- Code systems differ by family: 7M99 letter codes; FBO/MSP 3–4 digit codes; B-series 6-digit codes (450xxx, 850xxx, 880xxx, 150xxx). The code meanings are not in ResultData. A frequency table for the quality department is at /home/tony/afvi-ai-data/inventory/vrs-codes-by-family.csv.
+- B-series families are weak in training-LOT CV as well (4SP0223G01 0.48, 6ST2001Q01 0.27), so the label definition for numeric code systems is the first suspect.
+
 ## Next work
 
-1. Confirm on production LOTs inspected after 2026-11-06: inventory and export only new groups, then score them with the round-2 settings unchanged. That is the first fully unseen test.
-2. Investigate the weak B-series models (4SP0223G01, 6ST2001Q01) on training LOTs only. Possible causes are label semantics, missing fields, or the need for image information.
+1. When new production LOTs appear, export only the new groups and run afvi_ai.confirm with the frozen artifact. Do not refit or retune first.
+2. Obtain the VRS code table (code to defect name or disposition) for the B-series and FBO/MSP families, and decide per code whether it means a real defect. Re-label from that decision before any new model round; any new round must be selected on training LOTs and confirmed on unseen LOTs.
 3. Keep image work and label assistance (for example multimodal review) as a separate, approved phase. It needs a decision on whether factory images may leave the network.
 
 Run commands are in docs/modeling.md. Parameter replay remains a separate gate: it must reproduce the machine's output for the same frame, mask, spec, and parameters before parameter comparisons can be trusted.
 
 ## Verification at handoff
 
-- Python unit suite: 42 tests passed.
+- Python unit suite: 47 tests passed.
 - Laravel suite in the composer:2 container (PHP 8.5): 6 tests passed; Pint clean.
 - Go exporter built with go build -mod=mod; the export of 185 groups is logged in exports-20261106-all/export.log.
 

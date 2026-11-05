@@ -55,4 +55,18 @@ ResultData/Data/{AFVI13,AFVI14} 下按 model/LOT/group 有限层级盘点出 228
       --max-rows-per-lot-state 1500 --max-rows 400000 --seed 0 --tune --tuning-workers 8 \
       --holdout-note "说明该留出集此前被评估过几次"
 
+## 冻结模型与新 LOT 确认
+
+第 4 步加 --final-model "$AFVI_DATA_HOME/models/<name>.json" 时，会用选定设置在全部有标签 LOT 上重拟合并保存模型 JSON（当前为 models/afvi-risk-v3-20261106.json，62 个 LOT，structured、L2 0.001）。新数据到来后，只对新增组做第 1、2 步，然后：
+
+    PYTHONPATH=python python3 -m afvi_ai.confirm \
+      --model "$AFVI_DATA_HOME/models/afvi-risk-v3-20261106.json" \
+      --input "$AFVI_DATA_HOME/exports-new" --output "$AFVI_DATA_HOME/reports/confirm-<date>.json"
+
+确认不重拟合；模型训练集中出现过的 LOT 会被剔除。新 LOT 需满足与留出集相同的门槛（至少 5 个 LOT，两类各至少 3 个 LOT、20 行），合格判定沿用事先登记的标准：LOT bootstrap 下界 > 0.5，且点估计高于 log1p(area_total) 参照。
+
+## 标签语义
+
+ivs_1 是复核站人工键入码（见 PxSpecTool docs/result-data/50-ivs-keyin.md），"0" 表示未键入。ResultData/DLG 列出的是送复核的条带，不是深度学习抽样；在已复核条带内，列表内外的键入率相近（3.8% 与 4.4%）。码表按型号族配置：7M99 系为字母码，FBO/MSP 系为 3–4 位数字，B 系（4SP0223G01、3HN1008O01、6AN0921I01、6ST2001Q01）为 6 位数字（450xxx/850xxx/880xxx/150xxx）。码含义不在 ResultData 中；各族码频次表在 $AFVI_DATA_HOME/inventory/vrs-codes-by-family.csv，留有含义和是否真实不良两列待品质部门填写。B 系在训练 LOT 交叉验证中同样表现弱，标签定义是首要怀疑对象。
+
 本次实际导出目录是 $AFVI_DATA_HOME/exports-20261106-all，训练输入为只含生产组的符号链接目录 exports-20261106-production。达到门槛只说明对独立历史 LOT 的 VRS 判定有评估结果，不代表生产召回率，也不构成参数优化结论。参数回放仍需先证明固定帧、规格和参数可以复现设备输出。

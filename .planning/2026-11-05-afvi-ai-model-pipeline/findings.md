@@ -56,3 +56,10 @@ Obtain or identify more independently labeled production LOTs. First audit their
 - Verdict: meets the pre-registered criteria (lower bound above 0.5; point estimate above the reference). The advantage over the reference is not significant at 95%, and the holdout was used twice, so it is a development-qualified candidate pending confirmation on new LOTs.
 - Held-out by machine: AFVI13 0.667 (reference 0.567), AFVI14 0.637 (0.552). By model: 7M99-593 0.855, 24FBO060-19 0.872, 25FBO015-15 0.843, 24MSP037-15 0.817, 7M99-535 0.813, 7M99-586 0.793, 22SIP015-07 0.795; 6AN0921I01 0.600, 7M99-631 0.600, 6ST2001Q01 0.537, 4SP0223G01 0.498.
 - Largest coefficients (standardized): area_total +1.32, light_id=2 +1.10, sr_metal=2 +1.06 vs sr_metal=1, length_max -1.01, width_max +0.98, area_max -0.96, is_dummy -0.52. side and def_side carry the same information.
+
+## Follow-up (2026-11-06, after round 2)
+
+- No new groups since the export (fresh inventory: same 228 production groups; newest group mtime 2026-11-02).
+- Final model: round-2 settings refit on 62 labeled LOTs -> models/afvi-risk-v3-20261106.json. The rerun reproduced the round-2 report exactly. The confirm CLI drops seen LOTs.
+- Training-LOT-only analysis: OOF ROC-AUC 0.729 overall; 7M99-593 0.823, 7M99-586 0.778, 7M99-460 0.694, 24FBO060-19 0.823, 23MSP217-49 0.829, 3HN1008O01 0.803; weak 4SP0223G01 0.478, 24MSP037-15 0.542, 6ST2001Q01 0.266 (2 LOTs, positive rate 0.1%, codes mostly 9998).
+- DLG = strips sent to review; keying rate inside reviewed strips is the same on and off the DLG list. VRS code systems differ by family; the code table is needed to define labels for the numeric systems.

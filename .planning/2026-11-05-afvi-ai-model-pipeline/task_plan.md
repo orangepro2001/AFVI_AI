@@ -4,7 +4,7 @@
 Stabilize and document the read-only AFVI point-risk prototype, verify its limits against the AI server's actual indexed data, and leave local and AI source checkouts synchronized.
 
 ## Next Step
-[Confirm the round-2 model on production LOTs inspected after 2026-11-06 with settings unchanged; investigate weak B-series models on training LOTs only.]
+[Run afvi_ai.confirm with models/afvi-risk-v3-20261106.json when new production LOTs exist; obtain the VRS code table to fix labels for numeric code families.]
 
 ## Current Phase
 Complete: multi-LOT evaluation; round 2 meets pre-registered criteria (held-out ROC-AUC 0.655, 0.565-0.711)
