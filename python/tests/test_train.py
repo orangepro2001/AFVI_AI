@@ -3,7 +3,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from afvi_ai.train import input_files, label_state, load_sampled
+from datetime import datetime, timezone
+
+from afvi_ai.baseline import build_report, model_from_dict
+from afvi_ai.train import final_model_artifact, input_files, label_state, load_sampled
 
 
 def record(lot, index, positive):
@@ -75,6 +78,40 @@ class SampledLoaderTests(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 load_sampled(input_files(root), max_rows_per_lot_state=5)
+
+
+class FinalModelTests(unittest.TestCase):
+    def test_final_model_is_refit_on_every_labeled_lot_with_the_report_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for lot_index in range(12):
+                lot = f"LOT-{lot_index:02d}"
+                inspected_at = f"2026-{9 if lot_index < 6 else 10:02d}-{lot_index + 1:02d}T00:00:00+09:00"
+                lot_dir = root / "AFVI13" / "MODEL" / lot
+                lot_dir.mkdir(parents=True)
+                with (lot_dir / "1.jsonl").open("w") as stream:
+                    for index in range(1, 31):
+                        row = record(lot, index, positive=index % 2 == 0)
+                        row["features"]["area_total"] = 20.0 if index % 2 == 0 else 1.0
+                        row["inspected_at"] = inspected_at
+                        stream.write(json.dumps(row) + "\n")
+            samples, _ = load_sampled(input_files(root), max_rows_per_lot_state=50)
+            report = build_report(
+                samples,
+                cutoff=datetime(2026, 10, 1, tzinfo=timezone.utc),
+                data_source={"export": "fixture"},
+            )
+
+            artifact = json.loads(json.dumps(final_model_artifact(samples, report)))
+            model = model_from_dict(artifact)
+
+            self.assertEqual(len(artifact["training_lots"]), 12)
+            self.assertEqual(artifact["feature_spec"]["name"], report["model"]["feature_set"])
+            self.assertEqual(artifact["l2_strength"], report["model"]["l2_strength"])
+            self.assertEqual(artifact["metadata"]["evaluation_status"], "evaluated")
+            positive = next(row for row in samples if row.label == 1)
+            negative = next(row for row in samples if row.label == 0)
+            self.assertGreater(model.score(positive), model.score(negative))
 
 
 if __name__ == "__main__":

@@ -13,7 +13,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator
 
-from .baseline import MAX_REPORTED_SAMPLES, build_report
+from .baseline import (
+    DEFAULT_NEGATIVE_WEIGHT,
+    FEATURE_SPECS,
+    MAX_REPORTED_SAMPLES,
+    ModelConfig,
+    build_report,
+    fit_logistic,
+    model_to_dict,
+)
 from .contracts import normalize_export_record, validate_unique_keys
 from .manifest import ManifestIndex
 
@@ -155,6 +163,32 @@ def _stream(
                     raise ValueError(f"{path}: invalid JSONL row {line_number}: {error}") from error
 
 
+def final_model_artifact(samples: tuple[Any, ...], report: dict[str, object]) -> dict[str, object]:
+    """Refit the report's selected configuration on all labeled LOTs for scoring future LOTs."""
+    model_info = report["model"]
+    config = ModelConfig(FEATURE_SPECS[model_info["feature_set"]], float(model_info["l2_strength"]))
+    labeled = [row for row in samples if row.label in (0, 1) and not row.excluded and row.vrs_observed]
+    model = fit_logistic(labeled, negative_weight=DEFAULT_NEGATIVE_WEIGHT, l2=config.l2, spec=config.spec)
+    evaluation = report["evaluation"]
+    return model_to_dict(
+        model,
+        training_lots=sorted({row.lot for row in labeled}),
+        metadata={
+            "generated_at": datetime.now().astimezone().isoformat(),
+            "selection_report_generated_at": report["generated_at"],
+            "selection": model_info.get("selection"),
+            "evaluation_status": evaluation["status"],
+            "held_out_metrics": evaluation["metrics"],
+            "held_out_bootstrap": evaluation["bootstrap"],
+            "held_out_lots": evaluation["split"]["test_lots"],
+            "holdout_history": evaluation.get("holdout_history"),
+            "sampling": report.get("sampling"),
+            "data_source": report["data_source"],
+            "note": "Refit on all labeled LOTs with the selected settings; confirm only on LOTs absent from training_lots.",
+        },
+    )
+
+
 def write_report(path: Path, report: dict[str, object]) -> None:
     destination = Path(path).expanduser().resolve()
     repository_root = Path(__file__).resolve().parents[2]
@@ -214,6 +248,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--tuning-workers", type=int, default=1, help="parallel processes for --tune")
     parser.add_argument("--holdout-note", help="record how often this held-out LOT set has been evaluated before")
+    parser.add_argument(
+        "--final-model",
+        type=Path,
+        help="also refit the selected configuration on every labeled LOT and save the model JSON (outside Git)",
+    )
     return parser
 
 
@@ -277,6 +316,8 @@ def main(argv: list[str] | None = None) -> int:
             holdout_history=args.holdout_note,
         )
         write_report(args.output, report)
+        if args.final_model is not None:
+            write_report(args.final_model, final_model_artifact(samples, report))
     except (OSError, TypeError, ValueError) as error:
         print(f"afvi-train: {error}", file=sys.stderr)
         return 2

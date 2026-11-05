@@ -379,6 +379,58 @@ def fit_logistic(
     )
 
 
+def model_to_dict(model: LogisticModel, *, training_lots: Sequence[str], metadata: dict[str, object]) -> dict[str, object]:
+    """Serialize a fitted model so new LOTs can be scored without refitting."""
+    return {
+        "artifact_version": 1,
+        "name": "regularized_structured_logistic",
+        "version": "structured-logistic-v3",
+        "feature_spec": {
+            "name": model.spec.name,
+            "numeric": list(model.spec.numeric),
+            "flags": list(model.spec.flags),
+            "categorical": list(model.spec.categorical),
+        },
+        "levels": [list(levels) for levels in model.levels],
+        "column_names": list(model.column_names),
+        "means": list(model.means),
+        "scales": list(model.scales),
+        "coefficients": list(model.coefficients),
+        "intercept": model.intercept,
+        "negative_weight": model.negative_weight,
+        "l2_strength": model.l2,
+        "training_lots": sorted(training_lots),
+        "metadata": metadata,
+    }
+
+
+def model_from_dict(payload: dict[str, object]) -> LogisticModel:
+    if payload.get("artifact_version") != 1:
+        raise ValueError("unsupported model artifact version")
+    spec_payload = payload["feature_spec"]
+    spec = FeatureSpec(
+        name=str(spec_payload["name"]),
+        numeric=tuple(spec_payload["numeric"]),
+        flags=tuple(spec_payload["flags"]),
+        categorical=tuple(spec_payload["categorical"]),
+    )
+    levels = tuple(tuple(str(level) for level in group) for group in payload["levels"])
+    model = LogisticModel(
+        means=tuple(float(value) for value in payload["means"]),
+        scales=tuple(float(value) for value in payload["scales"]),
+        coefficients=tuple(float(value) for value in payload["coefficients"]),
+        intercept=float(payload["intercept"]),
+        negative_weight=float(payload["negative_weight"]),
+        spec=spec,
+        levels=levels,
+        l2=float(payload["l2_strength"]),
+        column_names=tuple(payload["column_names"]),
+    )
+    if len(model.coefficients) != len(model.column_names) or len(model.means) != len(model.column_names):
+        raise ValueError("model artifact columns are inconsistent")
+    return model
+
+
 def select_config(
     train: Sequence[Sample], *, seed: int = 0, workers: int = 1
 ) -> tuple[ModelConfig, dict[str, object]]:
