@@ -40,3 +40,11 @@ Obtain or identify more independently labeled production LOTs. First audit their
 - Held-out ROC-AUC 0.518 (LOT bootstrap 95% 0.479–0.551); AP 0.505. Reference log1p(area_total) ROC-AUC 0.560; paired model−reference difference −0.105 to +0.023.
 - Verdict against pre-registered criteria: not qualified (lower bound not above 0.5, does not beat the reference).
 - Diagnosis: coefficients are near zero (area 0.0013, length −0.021, width −0.006). L2 strength 2.0 on a per-LOT-normalized mean loss was sized for one LOT and shrinks the model to a near-constant. This held-out set has now been looked at once.
+
+## Round 2 protocol (2026-11-06, user-approved, fixed before running)
+
+- User chose to retest on the same 28 held-out LOTs; the report records this as the second evaluation of that LOT set.
+- Split, sampling, criteria and reference unchanged from the pre-registration above.
+- Model selection uses training LOTs only: 5-fold LOT-grouped CV (folds by seeded LOT hash), metric mean fold ROC-AUC with equal class-by-LOT weights.
+- Grid: feature set {size3, structured} x L2 {2.0, 0.1, 0.01, 0.001}. structured = log1p(area_total, length_max, width_max, area_max) + is_dummy + one-hot side, def_side, light_id, channel_idx, sr_metal (levels learned from training rows). Coordinates and pc_idx are excluded.
+- Highest mean CV AUC wins (ties to the simpler, earlier grid entry); the winner is refit on all training LOTs and scored once on the holdout.
