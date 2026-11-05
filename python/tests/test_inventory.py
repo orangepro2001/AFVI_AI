@@ -16,6 +16,8 @@ class InventoryTests(unittest.TestCase):
             (root / "AFVI13/MODEL-A/MarkMCName_SH-VRS-31.txt").write_text("x")
             (root / "AFVI14/MODEL-B/LOT2/RH1-/0001").mkdir(parents=True)
             (root / "AFVI14/TEST0825-1/LOT3/1/0001").mkdir(parents=True)
+            (root / "AFVI14/MODEL-B/DRY-RUN/1/0001").mkdir(parents=True)
+            (root / "AFVI14/MODEL-B/0424-TEST/1/0001").mkdir(parents=True)
 
             groups, skipped = inventory(root)
 
@@ -23,7 +25,7 @@ class InventoryTests(unittest.TestCase):
                 [(g.machine, g.group_rel, g.strip_count) for g in groups],
                 [("AFVI13", "MODEL-A/LOT1/1", 2), ("AFVI14", "MODEL-B/LOT2/RH1-", 1)],
             )
-            self.assertEqual(skipped["excluded_lot_name"], 2)
+            self.assertEqual(skipped["excluded_lot_name"], 4)
             self.assertEqual(skipped["no_strips"], 1)
 
     def test_machine_filter(self):

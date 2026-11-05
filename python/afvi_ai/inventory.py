@@ -18,7 +18,8 @@ from pathlib import Path
 
 ATOM = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 STRIP = re.compile(r"^\d{4}$")
-EXCLUDED_NAME = re.compile(r"^test", re.IGNORECASE)
+EXCLUDED_NAME = re.compile(r"test|dry-run", re.IGNORECASE)
+"""Model or LOT names that mark trial, test, or dry runs rather than production LOTs."""
 
 
 @dataclass(frozen=True)
@@ -58,7 +59,7 @@ def inventory(data_root: Path, machines: list[str] | None = None) -> tuple[list[
             continue
         for model_entry in _directories(Path(machine_entry.path)):
             model = model_entry.name
-            if EXCLUDED_NAME.match(model):
+            if EXCLUDED_NAME.search(model):
                 skipped["excluded_lot_name"] += 1
                 continue
             if not ATOM.match(model):
@@ -66,7 +67,7 @@ def inventory(data_root: Path, machines: list[str] | None = None) -> tuple[list[
                 continue
             for lot_entry in _directories(Path(model_entry.path)):
                 lot = lot_entry.name
-                if EXCLUDED_NAME.match(lot):
+                if EXCLUDED_NAME.search(lot):
                     skipped["excluded_lot_name"] += 1
                     continue
                 if not ATOM.match(lot):
