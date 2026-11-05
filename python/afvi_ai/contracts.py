@@ -69,6 +69,7 @@ class Sample:
     excluded: bool = False
     missing_feature_bits: int = 0
     weight: float = 1.0
+    image_rel: str | None = None
 
 
 def label_from_ivs(ivs_1: str | None, *, vrs_observed: bool) -> LabelEvidence:
@@ -224,7 +225,9 @@ def normalize_export_record(
         unit_idx=row["unit_idx"],
         img_merge_idx=row["img_merge_idx"],
     )
+    source_image_rel = row.get("image_rel")
     return Sample(
+        image_rel=source_image_rel if isinstance(source_image_rel, str) and source_image_rel else None,
         key=key,
         lot=row["lot"],
         features=dict(row["features"]),

@@ -31,6 +31,8 @@ CSV_FIELDS = (
     "unit_idx",
     "img_merge_idx",
     "image_ref",
+    "result_data_image",
+    "image_saved",
     "area_total",
     "length_max",
     "width_max",
@@ -76,6 +78,21 @@ def rank_lots(
     return by_lot, unscored
 
 
+def source_image_path(sample: Any) -> str:
+    """Defect image path relative to the ResultData share root, as written by the inspection program."""
+    if not sample.image_rel:
+        return ""
+    return f"ResultData/Data/{sample.key.machine}/{sample.key.result_group}/{sample.image_rel}"
+
+
+def image_saved(share_root: Path | None, sample: Any) -> str:
+    """Stat (never read) the defect image below the share root; the inspector does not save every image."""
+    relative = source_image_path(sample)
+    if share_root is None or not relative:
+        return ""
+    return "yes" if (share_root / relative).is_file() else "no"
+
+
 def _safe_name(value: str) -> str:
     return "".join(character if character.isalnum() or character in "._-" else "_" for character in value)
 
@@ -85,8 +102,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", required=True, type=Path, help="model JSON written by afvi_ai.train --final-model")
     parser.add_argument("--input", required=True, type=Path, help="export JSONL file or directory")
     parser.add_argument("--output-dir", required=True, type=Path, help="destination directory outside Git")
+    parser.add_argument("--share-root", type=Path, help="read-only share root that contains ResultData, for --check-images")
+    parser.add_argument("--check-images", type=int, default=0, help="stat the image file for the top N points of each LOT")
     args = parser.parse_args(argv)
 
+    if args.check_images < 0:
+        parser.error("--check-images must not be negative")
+    if args.check_images and args.share_root is None:
+        parser.error("--check-images requires --share-root")
     repository_root = Path(__file__).resolve().parents[2]
     output_dir = args.output_dir.expanduser().resolve()
     if output_dir == repository_root or repository_root in output_dir.parents:
@@ -125,6 +148,8 @@ def main(argv: list[str] | None = None) -> int:
                             sample.key.unit_idx,
                             sample.key.img_merge_idx,
                             sample.image_ref or "",
+                            source_image_path(sample),
+                            image_saved(args.share_root, sample) if rank <= args.check_images else "",
                             features.get("area_total"),
                             features.get("length_max"),
                             features.get("width_max"),

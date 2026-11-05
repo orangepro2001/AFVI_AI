@@ -22,6 +22,7 @@ def export_row(lot, index, size, positive):
         "vrs_observed": True,
         "ivs_1": "OT15" if positive else "0",
         "inspected_at": "2026-11-10T00:00:00+09:00",
+        "image_rel": f"0001/Unit/U0/FC/p{index}.bmp",
     }
 
 
@@ -44,7 +45,19 @@ class ScoreCliTests(unittest.TestCase):
                 for index, size in enumerate((1.0, 30.0, 5.0), start=1):
                     stream.write(json.dumps(export_row("NEW-LOT", index, size, positive=size > 10)) + "\n")
 
-            code = main(["--model", str(root / "model.json"), "--input", str(root / "new.jsonl"), "--output-dir", str(root / "out")])
+            image = root / "share" / "ResultData/Data/AFVI13/MODEL/NEW-LOT/1/0001/Unit/U0/FC/p2.bmp"
+            image.parent.mkdir(parents=True)
+            image.write_bytes(b"")
+
+            code = main(
+                [
+                    "--model", str(root / "model.json"),
+                    "--input", str(root / "new.jsonl"),
+                    "--output-dir", str(root / "out"),
+                    "--share-root", str(root / "share"),
+                    "--check-images", "2",
+                ]
+            )
 
             self.assertEqual(code, 0)
             with (root / "out" / "NEW-LOT.csv").open(encoding="utf-8-sig") as stream:
@@ -52,6 +65,8 @@ class ScoreCliTests(unittest.TestCase):
             self.assertEqual([row["img_merge_idx"] for row in rows], ["2", "3", "1"])
             self.assertEqual(rows[0]["rank"], "1")
             self.assertEqual(rows[0]["vrs_code"], "OT15")
+            self.assertEqual(rows[0]["result_data_image"], "ResultData/Data/AFVI13/MODEL/NEW-LOT/1/0001/Unit/U0/FC/p2.bmp")
+            self.assertEqual([row["image_saved"] for row in rows], ["yes", "no", ""])
             self.assertEqual(rows[0]["family_heldout_roc_auc"], "0.810")
             self.assertEqual(rows[0]["family_in_training"], "yes")
             summary = json.loads((root / "out" / "summary.json").read_text())
