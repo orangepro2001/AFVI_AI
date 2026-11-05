@@ -152,6 +152,14 @@ class DashboardTest extends TestCase
                         'average_precision' => ['low' => 0.302, 'high' => 0.517],
                     ],
                 ],
+                'reference' => [
+                    'name' => 'log1p_area_total',
+                    'metrics' => ['roc_auc' => 0.655],
+                    'paired_bootstrap' => ['roc_auc_difference' => ['low' => 0.041, 'high' => 0.212]],
+                ],
+                'breakdown' => [
+                    'model' => [['name' => '7M99-586', 'rows' => 1200, 'lots' => 4, 'model_roc_auc' => 0.801, 'reference_roc_auc' => 0.702]],
+                ],
             ],
             'samples' => [[
                 'key' => ['machine' => 'AFVI13', 'result_group' => 'MODEL/LOT/1', 'strip' => '1', 'side' => 'FC'],
@@ -172,7 +180,11 @@ class DashboardTest extends TestCase
             ->assertSee('假设良品所属训练 / 测试 LOT')
             ->assertSee('2 / 2')
             ->assertSee('留出 LOT')
-            ->assertSee('0.913');
+            ->assertSee('0.913')
+            ->assertSee('0.655')
+            ->assertSee('0.041 - 0.212')
+            ->assertSee('7M99-586')
+            ->assertSee('0.801 / 0.702');
 
         $this->removeDirectory($directory);
     }

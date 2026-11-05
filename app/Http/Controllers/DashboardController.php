@@ -89,6 +89,12 @@ class DashboardController extends Controller
         $evaluation['metrics'] = is_array($evaluation['metrics'] ?? null) ? $evaluation['metrics'] : null;
         $evaluation['bootstrap'] = is_array($evaluation['bootstrap'] ?? null) ? $evaluation['bootstrap'] : [];
         $evaluation['sensitivity'] = is_array($evaluation['sensitivity'] ?? null) ? $evaluation['sensitivity'] : [];
+        $evaluation['reference'] = is_array($evaluation['reference'] ?? null) ? $evaluation['reference'] : null;
+        $breakdown = is_array($evaluation['breakdown'] ?? null) ? $evaluation['breakdown'] : [];
+        $evaluation['breakdown'] = [
+            'machine' => $this->breakdownRows($breakdown['machine'] ?? null),
+            'model' => $this->breakdownRows($breakdown['model'] ?? null),
+        ];
         $report['evaluation'] = $evaluation;
         $model['feature_allowlist'] = is_array($model['feature_allowlist'] ?? null) ? $model['feature_allowlist'] : [];
         $report['model'] = $model;
@@ -114,6 +120,32 @@ class DashboardController extends Controller
         $report['samples'] = $normalizedSamples;
 
         return $report;
+    }
+
+    /**
+     * @return list<array{name: string, rows: int, lots: int, model_roc_auc: ?float, reference_roc_auc: ?float}>
+     */
+    private function breakdownRows(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+
+        $rows = [];
+        foreach (array_slice($value, 0, 100) as $entry) {
+            if (! is_array($entry) || ! is_scalar($entry['name'] ?? null)) {
+                continue;
+            }
+            $rows[] = [
+                'name' => (string) $entry['name'],
+                'rows' => $this->count($entry['rows'] ?? null),
+                'lots' => $this->count($entry['lots'] ?? null),
+                'model_roc_auc' => is_numeric($entry['model_roc_auc'] ?? null) ? (float) $entry['model_roc_auc'] : null,
+                'reference_roc_auc' => is_numeric($entry['reference_roc_auc'] ?? null) ? (float) $entry['reference_roc_auc'] : null,
+            ];
+        }
+
+        return $rows;
     }
 
     private function count(mixed $value): int

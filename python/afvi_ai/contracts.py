@@ -68,6 +68,7 @@ class Sample:
     image_status: str = "not_checked"
     excluded: bool = False
     missing_feature_bits: int = 0
+    weight: float = 1.0
 
 
 def label_from_ivs(ivs_1: str | None, *, vrs_observed: bool) -> LabelEvidence:

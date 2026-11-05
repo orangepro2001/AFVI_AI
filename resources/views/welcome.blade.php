@@ -131,7 +131,11 @@
             $apLow = data_get($evaluation, 'bootstrap.intervals.average_precision.low');
             $apHigh = data_get($evaluation, 'bootstrap.intervals.average_precision.high');
             $status = $evaluation['status'] ?? 'unknown';
-            $statusClass = in_array($status, ['validated', 'supported'], true) ? 'good' : (in_array($status, ['insufficient_support', 'exploratory_only'], true) ? 'warn' : 'neutral');
+            $referenceAuc = data_get($evaluation, 'reference.metrics.roc_auc');
+            $differenceLow = data_get($evaluation, 'reference.paired_bootstrap.roc_auc_difference.low');
+            $differenceHigh = data_get($evaluation, 'reference.paired_bootstrap.roc_auc_difference.high');
+            $formatAuc = fn ($value) => is_numeric($value) ? number_format((float) $value, 3) : '—';
+            $statusClass = in_array($status, ['evaluated', 'validated', 'supported'], true) ? 'good' : (in_array($status, ['insufficient_support', 'exploratory_only'], true) ? 'warn' : 'neutral');
         @endphp
         <section class="stats" aria-label="数据概况">
             <div class="stat"><div class="stat-label">合并缺陷点</div><div class="stat-value">{{ number_format($coverage['samples']) }}</div><div class="stat-note">来自解析后的结果组</div></div>
@@ -178,6 +182,10 @@
                             <div class="metric"><div class="metric-label">Average precision</div><div class="metric-value">{{ is_numeric($ap) ? number_format((float) $ap, 3) : '—' }}</div></div>
                             <div class="metric"><div class="metric-label">ROC AUC · 95% LOT 区间</div><div class="metric-value" style="font-size:13px">{{ is_numeric($aucLow) && is_numeric($aucHigh) ? number_format((float) $aucLow, 3).' - '.number_format((float) $aucHigh, 3) : '—' }}</div></div>
                             <div class="metric"><div class="metric-label">AP · 95% LOT 区间</div><div class="metric-value" style="font-size:13px">{{ is_numeric($apLow) && is_numeric($apHigh) ? number_format((float) $apLow, 3).' - '.number_format((float) $apHigh, 3) : '—' }}</div></div>
+                            @if (is_array($evaluation['reference']))
+                                <div class="metric"><div class="metric-label">参照 AUC · log1p(area_total)</div><div class="metric-value">{{ $formatAuc($referenceAuc) }}</div></div>
+                                <div class="metric"><div class="metric-label">模型 − 参照 AUC · 95% 配对区间</div><div class="metric-value" style="font-size:13px">{{ is_numeric($differenceLow) && is_numeric($differenceHigh) ? number_format((float) $differenceLow, 3).' - '.number_format((float) $differenceHigh, 3) : '—' }}</div></div>
+                            @endif
                         </div>
                     @else
                         <div class="empty" style="padding:14px 0 2px">独立 LOT 或类别支持不足，暂不显示泛化指标。</div>
@@ -188,6 +196,17 @@
                 </div>
             </section>
         </div>
+
+        @if (! empty($evaluation['breakdown']['model']))
+            <section class="panel" style="margin-top:16px">
+                <div class="panel-head"><h2>留出 LOT 分型号表现</h2><span class="panel-kicker">模型 / 参照 ROC AUC</span></div>
+                <div class="panel-body">
+                    @foreach ($evaluation['breakdown']['model'] as $entry)
+                        <div class="data-line"><span class="mono">{{ $entry['name'] }} · {{ number_format($entry['rows']) }} 点 / {{ $entry['lots'] }} LOT</span><strong>{{ $formatAuc($entry['model_roc_auc']) }} / {{ $formatAuc($entry['reference_roc_auc']) }}</strong></div>
+                    @endforeach
+                </div>
+            </section>
+        @endif
 
         <section class="panel" style="margin-top:16px">
             <div class="panel-head"><h2>待复核点</h2><span class="panel-kicker">按风险分排序 · {{ count($report['samples']) }} 条</span></div>

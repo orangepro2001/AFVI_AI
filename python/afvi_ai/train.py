@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import hashlib
 import json
 import os
+import random
 import sys
 import tempfile
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from .baseline import MAX_REPORTED_SAMPLES, build_report
 from .contracts import normalize_export_record, validate_unique_keys
@@ -52,6 +56,105 @@ def load_jsonl(
     return tuple(samples)
 
 
+def input_files(path: Path) -> tuple[Path, ...]:
+    """Return one JSONL file, or every ``*.jsonl`` below a directory in sorted order."""
+    source = Path(path)
+    if source.is_dir():
+        files = tuple(sorted(candidate for candidate in source.rglob("*.jsonl") if candidate.is_file()))
+        if not files:
+            raise ValueError(f"no .jsonl files below {source}")
+        return files
+    return (source,)
+
+
+def label_state(sample: Any) -> str:
+    """Sampling stratum inside a LOT; keeps every label state represented."""
+    if sample.excluded:
+        return "conflicting"
+    if sample.label is None:
+        return "unlabeled"
+    return "positive" if sample.label == 1 else "assumed_good"
+
+
+def load_sampled(
+    paths: tuple[Path, ...],
+    *,
+    max_rows_per_lot_state: int,
+    seed: int = 0,
+    max_line_bytes: int = DEFAULT_MAX_LINE_BYTES,
+    image_index: ManifestIndex | None = None,
+    verify_images: bool = False,
+) -> tuple[tuple[Any, ...], dict[str, object]]:
+    """Stream exports and keep a seeded reservoir sample per (LOT, label state).
+
+    Each kept row carries ``weight = stratum_total / kept`` so LOT-level class
+    proportions and coverage totals match the full export.
+    """
+    if max_rows_per_lot_state < 1 or max_line_bytes < 1:
+        raise ValueError("input limits must be positive")
+    reservoirs: dict[tuple[str, str], list[Any]] = defaultdict(list)
+    totals: dict[tuple[str, str], int] = defaultdict(int)
+    generators: dict[tuple[str, str], random.Random] = {}
+    seen_keys: set[object] = set()
+    for sample in _stream(paths, max_line_bytes=max_line_bytes, image_index=image_index, verify_images=verify_images):
+        if sample.key in seen_keys:
+            raise ValueError(f"duplicate sample key: {sample.key}")
+        seen_keys.add(sample.key)
+        stratum = (sample.lot, label_state(sample))
+        totals[stratum] += 1
+        reservoir = reservoirs[stratum]
+        if len(reservoir) < max_rows_per_lot_state:
+            reservoir.append(sample)
+            continue
+        generator = generators.get(stratum)
+        if generator is None:
+            digest = hashlib.sha256(f"{seed}\0{stratum[0]}\0{stratum[1]}".encode("utf-8")).digest()
+            generator = generators[stratum] = random.Random(int.from_bytes(digest[:8], "big"))
+        slot = generator.randrange(totals[stratum])
+        if slot < max_rows_per_lot_state:
+            reservoir[slot] = sample
+    samples = []
+    for stratum in sorted(reservoirs):
+        kept = reservoirs[stratum]
+        weight = totals[stratum] / len(kept)
+        samples.extend(dataclasses.replace(sample, weight=weight) for sample in kept)
+    sampling = {
+        "method": "seeded_reservoir_per_lot_label_state",
+        "max_rows_per_lot_state": max_rows_per_lot_state,
+        "input_files": len(paths),
+        "input_rows": sum(totals.values()),
+        "kept_rows": len(samples),
+        "sampled_strata": sum(1 for stratum, total in totals.items() if total > len(reservoirs[stratum])),
+    }
+    return tuple(samples), sampling
+
+
+def _stream(
+    paths: tuple[Path, ...],
+    *,
+    max_line_bytes: int,
+    image_index: ManifestIndex | None,
+    verify_images: bool,
+) -> Iterator[Any]:
+    for path in paths:
+        with Path(path).open("r", encoding="utf-8") as stream:
+            for line_number, line in enumerate(stream, start=1):
+                if len(line.encode("utf-8")) > max_line_bytes:
+                    raise ValueError(f"{path}: JSONL row {line_number} exceeds {max_line_bytes} bytes")
+                if not line.strip():
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError as error:
+                    raise ValueError(f"{path}: invalid JSONL row {line_number}: {error}") from error
+                if not isinstance(row, dict):
+                    raise ValueError(f"{path}: JSONL row {line_number} must be an object")
+                try:
+                    yield normalize_export_record(row, image_index=image_index, verify_image=verify_images)
+                except (TypeError, ValueError) as error:
+                    raise ValueError(f"{path}: invalid JSONL row {line_number}: {error}") from error
+
+
 def write_report(path: Path, report: dict[str, object]) -> None:
     destination = Path(path).expanduser().resolve()
     repository_root = Path(__file__).resolve().parents[2]
@@ -87,7 +190,7 @@ def _cutoff(value: str) -> datetime:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build a conservative AFVI historical-VRS risk ranking report.")
-    parser.add_argument("--input", required=True, type=Path, help="PxSpecTool merge-point JSONL export")
+    parser.add_argument("--input", required=True, type=Path, help="PxSpecTool merge-point JSONL export, or a directory of them")
     parser.add_argument("--output", required=True, type=Path, help="external JSON report path, e.g. AFVI_DATA_HOME/reports/latest.json")
     parser.add_argument("--cutoff", required=True, type=_cutoff, help="timezone-aware LOT/time split cutoff")
     parser.add_argument("--manifest", type=Path, help="existing JPG scanner manifest JSONL")
@@ -95,6 +198,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--image-label", help="single directory label beneath jpg-root")
     parser.add_argument("--verify-images", action="store_true", help="check JPG file existence without reading image bytes")
     parser.add_argument("--max-rows", type=int, default=DEFAULT_MAX_ROWS)
+    parser.add_argument(
+        "--max-rows-per-lot-state",
+        type=int,
+        help="seeded reservoir sample size per (LOT, label state); kept rows are re-weighted to the full totals",
+    )
     parser.add_argument("--max-line-bytes", type=int, default=DEFAULT_MAX_LINE_BYTES)
     parser.add_argument("--test-fraction", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=0)
@@ -118,14 +226,31 @@ def main(argv: list[str] | None = None) -> int:
     image_index = None
     if args.manifest is not None:
         image_index = ManifestIndex.load(args.manifest, args.jpg_root, args.image_label)
+    if args.max_rows_per_lot_state is not None and args.max_rows_per_lot_state < 1:
+        parser.error("--max-rows-per-lot-state must be positive")
+    if args.input.is_dir() and args.max_rows_per_lot_state is None:
+        parser.error("a directory --input requires --max-rows-per-lot-state")
+    sampling: dict[str, object] | None = None
     try:
-        samples = load_jsonl(
-            args.input,
-            max_rows=args.max_rows,
-            max_line_bytes=args.max_line_bytes,
-            image_index=image_index,
-            verify_images=args.verify_images,
-        )
+        if args.max_rows_per_lot_state is None:
+            samples = load_jsonl(
+                args.input,
+                max_rows=args.max_rows,
+                max_line_bytes=args.max_line_bytes,
+                image_index=image_index,
+                verify_images=args.verify_images,
+            )
+        else:
+            samples, sampling = load_sampled(
+                input_files(args.input),
+                max_rows_per_lot_state=args.max_rows_per_lot_state,
+                seed=args.seed,
+                max_line_bytes=args.max_line_bytes,
+                image_index=image_index,
+                verify_images=args.verify_images,
+            )
+            if len(samples) > args.max_rows:
+                raise ValueError(f"sampled rows ({len(samples)}) exceed --max-rows ({args.max_rows})")
         report = build_report(
             samples,
             cutoff=args.cutoff,
@@ -137,6 +262,7 @@ def main(argv: list[str] | None = None) -> int:
             test_fraction=args.test_fraction,
             seed=args.seed,
             report_sample_limit=args.report_sample_limit,
+            sampling=sampling,
         )
         write_report(args.output, report)
     except (OSError, TypeError, ValueError) as error:

@@ -155,6 +155,48 @@ class BaselineReportTests(unittest.TestCase):
         )
         self.assertIsNone(report["evaluation"]["metrics"])
 
+    def test_evaluated_report_includes_reference_and_breakdown(self):
+        report = build_report(
+            self.make_samples(20, points_per_lot=50),
+            cutoff=self.cutoff,
+            data_source={"export": "fixture.jsonl"},
+        )
+
+        evaluation = report["evaluation"]
+        self.assertEqual(evaluation["status"], "evaluated")
+        self.assertEqual(evaluation["reference"]["name"], "log1p_area_total")
+        self.assertAlmostEqual(evaluation["reference"]["metrics"]["roc_auc"], 1.0)
+        difference = evaluation["reference"]["paired_bootstrap"]["roc_auc_difference"]
+        self.assertAlmostEqual(difference["low"], 0.0)
+        self.assertAlmostEqual(difference["high"], 0.0)
+        self.assertEqual([entry["name"] for entry in evaluation["breakdown"]["model"]], ["MODEL"])
+        self.assertEqual([entry["name"] for entry in evaluation["breakdown"]["machine"]], ["AFVI13"])
+
+    def test_sampling_weight_restores_lot_class_ratio_in_fit(self):
+        full = self.make_samples(6, points_per_lot=40)
+        kept = []
+        for row in full:
+            if row.label == 0:
+                kept.append(replace(row, weight=2.0) if row.key.img_merge_idx % 4 == 1 else None)
+            else:
+                kept.append(row)
+        kept = tuple(row for row in kept if row is not None)
+
+        full_model = fit_logistic(full)
+        sampled_model = fit_logistic(kept)
+
+        self.assertAlmostEqual(full_model.intercept, sampled_model.intercept, places=6)
+        for left, right in zip(full_model.coefficients, sampled_model.coefficients):
+            self.assertAlmostEqual(left, right, places=6)
+
+    def test_coverage_counts_use_sampling_weights(self):
+        rows = tuple(replace(row, weight=3.0) for row in self.make_samples(1, points_per_lot=10))
+        report = build_report(rows, cutoff=self.cutoff, data_source={"export": "fixture.jsonl"})
+
+        self.assertEqual(report["coverage"]["samples"], 30)
+        self.assertEqual(report["coverage"]["loaded_rows"], 10)
+        self.assertEqual(report["coverage"]["positive"], 15)
+
     def test_report_is_strict_json_serializable(self):
         report = build_report(
             self.make_samples(1),

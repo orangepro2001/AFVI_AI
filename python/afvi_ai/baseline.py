@@ -5,7 +5,7 @@ import random
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 from .contracts import LabelConfidence, Sample
 from .split import split_by_lot_time
@@ -21,6 +21,7 @@ MIN_CLASS_LOTS = 3
 BOOTSTRAP_REPLICATES = 100
 MAX_ITERATIONS = 350
 MAX_REPORTED_SAMPLES = 2000
+REFERENCE_NAME = "log1p_area_total"
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,7 @@ def build_report(
     test_fraction: float = 0.2,
     seed: int = 0,
     report_sample_limit: int = MAX_REPORTED_SAMPLES,
+    sampling: dict[str, object] | None = None,
 ) -> dict[str, object]:
     if not samples:
         raise ValueError("no merge-point samples were loaded")
@@ -74,6 +76,8 @@ def build_report(
 
     metrics: dict[str, float | int] | None = None
     bootstrap: dict[str, object] | None = None
+    reference: dict[str, object] | None = None
+    breakdown: dict[str, list[dict[str, object]]] | None = None
     if evaluated and model is not None:
         scored_test = [(row, model.score(row)) for row in split_test]
         usable_scores = [(row, score) for row, score in scored_test if score is not None]
@@ -87,6 +91,18 @@ def build_report(
             "negative_rows": len(labels) - sum(labels),
         }
         bootstrap = _lot_bootstrap(usable_scores, seed=seed)
+        paired = [(row, score, reference_score(row)) for row, score in usable_scores]
+        paired = [(row, score, ref) for row, score, ref in paired if ref is not None]
+        reference = {
+            "name": REFERENCE_NAME,
+            "description": "Fixed single-feature ranking by log1p(area_total); no fitting.",
+            "metrics": _weighted_metrics([(row, ref) for row, _, ref in paired]),
+            "paired_bootstrap": _paired_auc_bootstrap(paired, seed=seed),
+        }
+        breakdown = {
+            "machine": _breakdown(paired, lambda row: row.key.machine),
+            "model": _breakdown(paired, lambda row: row.key.result_group.split("/", 1)[0]),
+        }
 
     sensitivity: dict[str, object] = {
         "negative_weights": list(SENSITIVITY_NEGATIVE_WEIGHTS),
@@ -121,14 +137,17 @@ def build_report(
 
     all_lots = {row.lot for row in samples}
     coverage = {
-        "samples": len(samples),
+        "samples": _weighted_count(samples),
+        "loaded_rows": len(samples),
         "lots": len(all_lots),
-        "observed": sum(row.vrs_observed for row in samples),
-        "unlabeled": sum(row.label is None and not row.excluded for row in samples),
-        "positive": sum(row.label == 1 and not row.excluded for row in samples),
-        "assumed_good": sum(row.label == 0 and row.label_confidence == LabelConfidence.LOW for row in samples),
-        "conflicting": sum(row.excluded for row in samples),
-        "feature_incomplete": sum(row.missing_feature_bits != 0 for row in samples),
+        "observed": _weighted_count(row for row in samples if row.vrs_observed),
+        "unlabeled": _weighted_count(row for row in samples if row.label is None and not row.excluded),
+        "positive": _weighted_count(row for row in samples if row.label == 1 and not row.excluded),
+        "assumed_good": _weighted_count(
+            row for row in samples if row.label == 0 and row.label_confidence == LabelConfidence.LOW
+        ),
+        "conflicting": _weighted_count(row for row in samples if row.excluded),
+        "feature_incomplete": _weighted_count(row for row in samples if row.missing_feature_bits != 0),
         "images": dict(Counter(row.image_status for row in samples)),
     }
 
@@ -152,6 +171,8 @@ def build_report(
         "metrics": metrics,
         "metric_weighting": "Each class receives equal total weight; within each class, each represented LOT receives equal weight.",
         "bootstrap": bootstrap,
+        "reference": reference,
+        "breakdown": breakdown,
         "label_basis": "Historical VRS rewrite: keyed non-zero ivs_1 positive; zero/empty assumed good with low confidence; absent rewrites and conflicts excluded.",
         "policy": {
             "min_train_lots": MIN_TRAIN_LOTS,
@@ -185,6 +206,7 @@ def build_report(
         "historical_vrs_only": True,
         "scope": "Ranks already-detected AFVI merge points against historical VRS rewrites; it cannot identify defects AFVI did not detect or validate production recall.",
         "coverage": coverage,
+        "sampling": sampling,
         "evaluation": evaluation,
         "model": model_info,
         "samples": [
@@ -249,7 +271,7 @@ def _training_weights(
     samples_and_vectors: Sequence[tuple[Sample, tuple[float, ...]]], negative_weight: float
 ) -> tuple[float, ...]:
     base_weights = [
-        1.0 if sample.label == 1 else negative_weight for sample, _ in samples_and_vectors
+        (1.0 if sample.label == 1 else negative_weight) * sample.weight for sample, _ in samples_and_vectors
     ]
     lot_totals: dict[str, float] = defaultdict(float)
     for (sample, _), weight in zip(samples_and_vectors, base_weights):
@@ -258,6 +280,80 @@ def _training_weights(
         weight / lot_totals[sample.lot]
         for (sample, _), weight in zip(samples_and_vectors, base_weights)
     )
+
+
+def reference_score(sample: Sample) -> float | None:
+    """Fixed comparison ranking: the first allow-listed feature, log1p(area_total)."""
+    raw = _raw_vector(sample)
+    return None if raw is None else raw[0]
+
+
+def _weighted_count(samples: Iterable[Sample]) -> int:
+    return round(sum(row.weight for row in samples))
+
+
+def _breakdown(
+    rows: Sequence[tuple[Sample, float, float]], group_of: Callable[[Sample], str]
+) -> list[dict[str, object]]:
+    grouped: dict[str, list[tuple[Sample, float, float]]] = defaultdict(list)
+    for item in rows:
+        grouped[group_of(item[0])].append(item)
+    result: list[dict[str, object]] = []
+    for name in sorted(grouped):
+        items = grouped[name]
+        lots_by_class = _class_lot_counts(row for row, _, _ in items)
+        entry: dict[str, object] = {
+            "name": name,
+            "rows": len(items),
+            "lots": len({row.lot for row, _, _ in items}),
+            "class_lots": lots_by_class,
+            "model_roc_auc": None,
+            "reference_roc_auc": None,
+        }
+        if min(lots_by_class.values()) > 0:
+            entry["model_roc_auc"] = _weighted_metrics([(row, score) for row, score, _ in items])["roc_auc"]
+            entry["reference_roc_auc"] = _weighted_metrics([(row, ref) for row, _, ref in items])["roc_auc"]
+        result.append(entry)
+    return result
+
+
+def _paired_auc_bootstrap(
+    rows: Sequence[tuple[Sample, float, float]], *, seed: int
+) -> dict[str, object] | None:
+    """LOT-cluster bootstrap of model AUC minus reference AUC on the same draws."""
+    by_lot: dict[str, list[tuple[Sample, float, float]]] = defaultdict(list)
+    for item in rows:
+        by_lot[item[0].lot].append(item)
+    lots = sorted(by_lot)
+    if len(lots) < MIN_TEST_LOTS:
+        return None
+    rng = random.Random(seed)
+    differences: list[float] = []
+    for _ in range(BOOTSTRAP_REPLICATES):
+        selected = [rng.choice(lots) for _ in lots]
+        draw: list[tuple[Sample, float, float]] = []
+        draw_lot_ids: list[str] = []
+        for occurrence, lot in enumerate(selected):
+            draw.extend(by_lot[lot])
+            draw_lot_ids.extend(f"{occurrence}:{lot}" for _ in by_lot[lot])
+        labels_by_lot: dict[int, set[str]] = defaultdict(set)
+        for (sample, _, _), lot_id in zip(draw, draw_lot_ids):
+            labels_by_lot[int(sample.label)].add(lot_id)
+        if not labels_by_lot[0] or not labels_by_lot[1]:
+            continue
+        model_auc = _weighted_metrics([(row, score) for row, score, _ in draw], metric_lot_ids=draw_lot_ids)["roc_auc"]
+        reference_auc = _weighted_metrics([(row, ref) for row, _, ref in draw], metric_lot_ids=draw_lot_ids)["roc_auc"]
+        differences.append(model_auc - reference_auc)
+    if len(differences) < BOOTSTRAP_REPLICATES * 0.8:
+        return {"method": "paired_lot_cluster_bootstrap", "valid_replicates": len(differences), "roc_auc_difference": None}
+    return {
+        "method": "paired_lot_cluster_bootstrap",
+        "valid_replicates": len(differences),
+        "roc_auc_difference": {
+            "low": _quantile(differences, 0.025),
+            "high": _quantile(differences, 0.975),
+        },
+    }
 
 
 def _raw_vector(sample: Sample) -> tuple[float, ...] | None:
