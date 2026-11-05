@@ -176,6 +176,9 @@
                         <div class="data-line"><span>假设良品所属训练 / 测试 LOT</span><strong>{{ $split['train_class_lots']['assumed_good'] ?? '—' }} / {{ $split['test_class_lots']['assumed_good'] ?? '—' }}</strong></div>
                     @endif
                     <p class="small muted">{{ $evaluation['reason'] ?? '报告未提供评估说明。' }}</p>
+                    @if (is_string($evaluation['holdout_history'] ?? null))
+                        <p class="small muted">留出集使用记录：{{ $evaluation['holdout_history'] }}</p>
+                    @endif
                     @if (is_array($metrics))
                         <div class="metrics">
                             <div class="metric"><div class="metric-label">ROC AUC</div><div class="metric-value">{{ is_numeric($auc) ? number_format((float) $auc, 3) : '—' }}</div></div>
@@ -192,6 +195,9 @@
                     @endif
                     @if (! empty($report['model']['feature_allowlist']))
                         <p class="footnote">特征：{{ implode(' · ', array_map('strval', $report['model']['feature_allowlist'])) }}</p>
+                        @if (is_scalar($report['model']['feature_set'] ?? null))
+                            <p class="footnote">特征集 {{ $report['model']['feature_set'] }} · L2 {{ is_numeric($report['model']['l2_strength'] ?? null) ? $report['model']['l2_strength'] : '—' }}{{ is_array(data_get($report, 'model.selection.chosen')) ? ' · 由训练 LOT 分组交叉验证选定' : '' }}</p>
+                        @endif
                     @endif
                 </div>
             </section>

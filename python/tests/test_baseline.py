@@ -3,7 +3,13 @@ import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
-from afvi_ai.baseline import DEFAULT_NEGATIVE_WEIGHT, _weighted_metrics, build_report, fit_logistic
+from afvi_ai.baseline import (
+    DEFAULT_NEGATIVE_WEIGHT,
+    STRUCTURED,
+    _weighted_metrics,
+    build_report,
+    fit_logistic,
+)
 from afvi_ai.contracts import normalize_export_record
 
 
@@ -196,6 +202,61 @@ class BaselineReportTests(unittest.TestCase):
         self.assertEqual(report["coverage"]["samples"], 30)
         self.assertEqual(report["coverage"]["loaded_rows"], 10)
         self.assertEqual(report["coverage"]["positive"], 15)
+
+    def with_structured_fields(self, rows):
+        enriched = []
+        for row in rows:
+            features = dict(row.features)
+            features.update(
+                area_max=features["area_total"],
+                is_dummy=False,
+                def_side="B",
+                light_id=2 if row.label == 1 else 1,
+                channel_idx=1,
+                sr_metal=1,
+            )
+            enriched.append(replace(row, features=features))
+        return tuple(enriched)
+
+    def test_structured_spec_learns_one_hot_levels_from_training_rows(self):
+        rows = self.with_structured_fields(self.make_samples(6, points_per_lot=20))
+        model = fit_logistic(rows, l2=0.01, spec=STRUCTURED)
+
+        self.assertIn("light_id=1", model.column_names)
+        self.assertIn("light_id=2", model.column_names)
+        unseen = replace(rows[0], features={**rows[0].features, "light_id": 9})
+        self.assertIsNotNone(model.score(unseen))
+        positive = next(row for row in rows if row.label == 1)
+        negative = next(row for row in rows if row.label == 0)
+        self.assertGreater(model.score(positive), model.score(negative))
+
+    def test_tuned_report_selects_config_by_training_lot_cv(self):
+        rows = self.with_structured_fields(self.make_samples(20, points_per_lot=30))
+        report = build_report(
+            rows,
+            cutoff=self.cutoff,
+            data_source={"export": "fixture.jsonl"},
+            tune=True,
+            holdout_history="second evaluation of this held-out LOT set",
+        )
+
+        selection = report["model"]["selection"]
+        self.assertEqual(selection["method"], "lot_grouped_cv_training_lots_only")
+        self.assertEqual(len(selection["candidates"]), 8)
+        self.assertIn(selection["chosen"]["feature_set"], {"size3", "structured"})
+        self.assertEqual(report["model"]["feature_set"], selection["chosen"]["feature_set"])
+        self.assertEqual(report["model"]["l2_strength"], selection["chosen"]["l2_strength"])
+        self.assertEqual(report["evaluation"]["holdout_history"], "second evaluation of this held-out LOT set")
+        json.dumps(report, allow_nan=False)
+
+    def test_untuned_report_keeps_frozen_size3_config(self):
+        report = build_report(
+            self.make_samples(20, points_per_lot=30), cutoff=self.cutoff, data_source={"export": "fixture.jsonl"}
+        )
+
+        self.assertIsNone(report["model"]["selection"])
+        self.assertEqual(report["model"]["feature_set"], "size3")
+        self.assertEqual(report["model"]["l2_strength"], 2.0)
 
     def test_report_is_strict_json_serializable(self):
         report = build_report(

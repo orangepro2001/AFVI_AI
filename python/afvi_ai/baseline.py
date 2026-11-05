@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import math
+import multiprocessing
 import random
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Iterable, Sequence
 
@@ -14,6 +17,10 @@ FEATURES = ("area_total", "length_max", "width_max")
 DEFAULT_NEGATIVE_WEIGHT = 0.25
 SENSITIVITY_NEGATIVE_WEIGHTS = (0.1, 0.25, 0.5)
 L2_STRENGTH = 2.0
+L2_GRID = (2.0, 0.1, 0.01, 0.001)
+TUNING_FOLDS = 5
+MAX_CATEGORY_LEVELS = 20
+MAX_NEWTON_ITERATIONS = 60
 MIN_TRAIN_LOTS = 5
 MIN_TEST_LOTS = 5
 MIN_CLASS_ROWS = 20
@@ -25,19 +32,59 @@ REFERENCE_NAME = "log1p_area_total"
 
 
 @dataclass(frozen=True)
+class FeatureSpec:
+    """Allow-listed structured inputs: log1p numerics, 0/1 flags, and one-hot categoricals.
+
+    The categorical name ``side`` reads the merge point's key side; others read ``features``.
+    """
+
+    name: str
+    numeric: tuple[str, ...]
+    flags: tuple[str, ...] = ()
+    categorical: tuple[str, ...] = ()
+
+    def allowlist(self) -> list[str]:
+        return [*self.numeric, *self.flags, *self.categorical]
+
+
+SIZE3 = FeatureSpec("size3", FEATURES)
+STRUCTURED = FeatureSpec(
+    "structured",
+    ("area_total", "length_max", "width_max", "area_max"),
+    ("is_dummy",),
+    ("side", "def_side", "light_id", "channel_idx", "sr_metal"),
+)
+FEATURE_SPECS = {spec.name: spec for spec in (SIZE3, STRUCTURED)}
+
+
+@dataclass(frozen=True)
+class ModelConfig:
+    spec: FeatureSpec = SIZE3
+    l2: float = L2_STRENGTH
+
+
+@dataclass(frozen=True)
 class LogisticModel:
     means: tuple[float, ...]
     scales: tuple[float, ...]
     coefficients: tuple[float, ...]
     intercept: float
     negative_weight: float
+    spec: FeatureSpec = SIZE3
+    levels: tuple[tuple[str, ...], ...] = ()
+    l2: float = L2_STRENGTH
+    column_names: tuple[str, ...] = field(default=FEATURES)
 
     def score(self, sample: Sample) -> float | None:
-        raw = _raw_vector(sample)
-        if raw is None:
+        values = _spec_values(sample, self.spec)
+        if values is None:
             return None
+        raw = _encode(values, self.spec, self.levels)
         vector = tuple((value - mean) / scale for value, mean, scale in zip(raw, self.means, self.scales))
         return _sigmoid(self.intercept + sum(weight * value for weight, value in zip(self.coefficients, vector)))
+
+    def named_coefficients(self) -> dict[str, float]:
+        return {"intercept": self.intercept, **dict(zip(self.column_names, self.coefficients))}
 
 
 def build_report(
@@ -49,6 +96,9 @@ def build_report(
     seed: int = 0,
     report_sample_limit: int = MAX_REPORTED_SAMPLES,
     sampling: dict[str, object] | None = None,
+    tune: bool = False,
+    tuning_workers: int = 1,
+    holdout_history: str | None = None,
 ) -> dict[str, object]:
     if not samples:
         raise ValueError("no merge-point samples were loaded")
@@ -65,7 +115,15 @@ def build_report(
     fit_rows = split_train if evaluated else eligible
     fit_lots = {row.lot for row in fit_rows}
     can_fit = _has_both_classes(fit_rows)
-    model = fit_logistic(fit_rows, negative_weight=DEFAULT_NEGATIVE_WEIGHT) if can_fit else None
+    config = ModelConfig()
+    selection: dict[str, object] | None = None
+    if tune and evaluated and can_fit:
+        config, selection = select_config(split_train, seed=seed, workers=tuning_workers)
+    model = (
+        fit_logistic(fit_rows, negative_weight=DEFAULT_NEGATIVE_WEIGHT, l2=config.l2, spec=config.spec)
+        if can_fit
+        else None
+    )
 
     if evaluated:
         model_status = "validated_candidate" if len(fit_lots) >= MIN_TRAIN_LOTS else "exploratory_only"
@@ -111,7 +169,9 @@ def build_report(
     }
     if can_fit:
         sensitivity_models = [
-            model if weight == DEFAULT_NEGATIVE_WEIGHT else fit_logistic(fit_rows, negative_weight=weight)
+            model
+            if weight == DEFAULT_NEGATIVE_WEIGHT
+            else fit_logistic(fit_rows, negative_weight=weight, l2=config.l2, spec=config.spec)
             for weight in SENSITIVITY_NEGATIVE_WEIGHTS
         ]
         ranking_rows = split.test if evaluated else samples
@@ -173,6 +233,7 @@ def build_report(
         "bootstrap": bootstrap,
         "reference": reference,
         "breakdown": breakdown,
+        "holdout_history": holdout_history,
         "label_basis": "Historical VRS rewrite: keyed non-zero ivs_1 positive; zero/empty assumed good with low confidence; absent rewrites and conflicts excluded.",
         "policy": {
             "min_train_lots": MIN_TRAIN_LOTS,
@@ -185,15 +246,13 @@ def build_report(
     model_info = {
         "status": model_status,
         "name": "regularized_structured_logistic",
-        "version": "structured-logistic-v2",
-        "feature_allowlist": list(FEATURES),
+        "version": "structured-logistic-v3",
+        "feature_set": config.spec.name,
+        "feature_allowlist": config.spec.allowlist(),
         "negative_weight": DEFAULT_NEGATIVE_WEIGHT,
-        "l2_strength": L2_STRENGTH,
-        "coefficients": (
-            {"intercept": model.intercept, **dict(zip(FEATURES, model.coefficients))}
-            if model is not None
-            else None
-        ),
+        "l2_strength": config.l2,
+        "coefficients": model.named_coefficients() if model is not None else None,
+        "selection": selection,
         "threshold_policy": "ranking_only_no_operational_cutoff",
         "training_rows": len(fit_rows) if model is not None else 0,
         "training_lots": sorted(fit_lots) if model is not None else [],
@@ -216,59 +275,284 @@ def build_report(
     }
 
 
-def fit_logistic(samples: Sequence[Sample], *, negative_weight: float = DEFAULT_NEGATIVE_WEIGHT) -> LogisticModel:
+def fit_logistic(
+    samples: Sequence[Sample],
+    *,
+    negative_weight: float = DEFAULT_NEGATIVE_WEIGHT,
+    l2: float = L2_STRENGTH,
+    spec: FeatureSpec = SIZE3,
+) -> LogisticModel:
+    """Ridge logistic regression on LOT-balanced weights, solved by damped Newton steps.
+
+    Objective: weighted mean log-loss + (l2 / 2) * ||coefficients||^2; the intercept is unpenalized.
+    """
     if not 0 < negative_weight <= 1:
         raise ValueError("negative_weight must be in (0, 1]")
-    usable = [(row, _raw_vector(row)) for row in samples if _usable_label(row)]
-    usable = [(row, vector) for row, vector in usable if vector is not None]
+    if l2 <= 0:
+        raise ValueError("l2 must be positive")
+    usable = []
+    for row in samples:
+        if not _usable_label(row):
+            continue
+        values = _spec_values(row, spec)
+        if values is not None:
+            usable.append((row, values))
     labels = [int(row.label) for row, _ in usable]
-    if len(set(labels)) < 2:
-        raise ValueError("training requires both positive and negative labels")
     if not usable:
         raise ValueError("no complete labeled training samples")
+    if len(set(labels)) < 2:
+        raise ValueError("training requires both positive and negative labels")
 
     row_weights = _training_weights(usable, negative_weight)
     total_weight = sum(row_weights)
-    raw_vectors = [vector for _, vector in usable]
+    levels = _category_levels(usable, row_weights, spec)
+    raw_vectors = [_encode(values, spec, levels) for _, values in usable]
+    width = len(raw_vectors[0])
     means = tuple(
         sum(weight * row[i] for row, weight in zip(raw_vectors, row_weights)) / total_weight
-        for i in range(len(FEATURES))
+        for i in range(width)
     )
-    scales = tuple(
-        max(
-            1.0e-9,
-            math.sqrt(
-                sum(weight * (row[i] - means[i]) ** 2 for row, weight in zip(raw_vectors, row_weights))
-                / total_weight
-            ),
+    scales = []
+    for i in range(width):
+        variance = sum(weight * (row[i] - means[i]) ** 2 for row, weight in zip(raw_vectors, row_weights)) / total_weight
+        deviation = math.sqrt(variance)
+        scales.append(deviation if deviation > 1.0e-9 else 1.0)
+    scales = tuple(scales)
+    design = [
+        (1.0, *((value - mean) / scale for value, mean, scale in zip(row, means, scales)))
+        for row in raw_vectors
+    ]
+    weights = [weight / total_weight for weight in row_weights]
+    positive_weight = sum(w for w, y in zip(weights, labels) if y == 1)
+    beta = [math.log(positive_weight / (1.0 - positive_weight))] + [0.0] * width
+    objective = _objective(design, labels, weights, beta, l2)
+
+    for _ in range(MAX_NEWTON_ITERATIONS):
+        size = width + 1
+        gradient = [0.0] * size
+        hessian = [[0.0] * size for _ in range(size)]
+        for vector, label, weight in zip(design, labels, weights):
+            probability = _sigmoid(sum(b * x for b, x in zip(beta, vector)))
+            error = (probability - label) * weight
+            curvature = probability * (1.0 - probability) * weight
+            for i in range(size):
+                value = vector[i]
+                gradient[i] += error * value
+                scaled = curvature * value
+                row_i = hessian[i]
+                for j in range(i, size):
+                    row_i[j] += scaled * vector[j]
+        for i in range(1, size):
+            gradient[i] += l2 * beta[i]
+            hessian[i][i] += l2
+        hessian[0][0] += 1.0e-12
+        for i in range(size):
+            for j in range(i):
+                hessian[i][j] = hessian[j][i]
+        step = _solve(hessian, gradient)
+        step_size = max(abs(d) for d in step)
+        if step_size < 1.0e-4:
+            beta = [b - d for b, d in zip(beta, step)]
+            if step_size < 1.0e-13:
+                break
+            continue
+        scale = 1.0
+        while True:
+            candidate = [b - scale * d for b, d in zip(beta, step)]
+            candidate_objective = _objective(design, labels, weights, candidate, l2)
+            if candidate_objective <= objective or scale < 1.0e-6:
+                break
+            scale *= 0.5
+        beta = candidate
+        objective = candidate_objective
+
+    return LogisticModel(
+        means=means,
+        scales=scales,
+        coefficients=tuple(beta[1:]),
+        intercept=beta[0],
+        negative_weight=negative_weight,
+        spec=spec,
+        levels=levels,
+        l2=l2,
+        column_names=_column_names(spec, levels),
+    )
+
+
+def select_config(
+    train: Sequence[Sample], *, seed: int = 0, workers: int = 1
+) -> tuple[ModelConfig, dict[str, object]]:
+    """Choose feature set and L2 by LOT-grouped cross-validation on training LOTs only."""
+    lots = sorted(
+        {row.lot for row in train},
+        key=lambda lot: hashlib.sha256(f"{seed}\0fold\0{lot}".encode("utf-8")).digest(),
+    )
+    fold_of = {lot: index % TUNING_FOLDS for index, lot in enumerate(lots)}
+    configs = [ModelConfig(spec, l2) for spec in (SIZE3, STRUCTURED) for l2 in L2_GRID]
+    tasks = [(config_index, fold) for config_index in range(len(configs)) for fold in range(TUNING_FOLDS)]
+    global _TUNING_STATE
+    _TUNING_STATE = (tuple(train), fold_of, configs)
+    try:
+        if workers > 1:
+            context = multiprocessing.get_context("fork")
+            with ProcessPoolExecutor(max_workers=workers, mp_context=context) as executor:
+                results = list(executor.map(_tuning_task, tasks))
+        else:
+            results = [_tuning_task(task) for task in tasks]
+    finally:
+        _TUNING_STATE = None
+
+    fold_scores: dict[int, list[float]] = defaultdict(list)
+    for config_index, _, auc in results:
+        if auc is not None:
+            fold_scores[config_index].append(auc)
+    table = []
+    for index, config in enumerate(configs):
+        scores = fold_scores[index]
+        table.append(
+            {
+                "feature_set": config.spec.name,
+                "l2_strength": config.l2,
+                "folds_scored": len(scores),
+                "mean_roc_auc": sum(scores) / len(scores) if scores else None,
+                "fold_roc_auc": scores,
+            }
         )
-        for i in range(len(FEATURES))
-    )
-    vectors = [tuple((value - mean) / scale for value, mean, scale in zip(row, means, scales)) for row in raw_vectors]
-    weights = row_weights
-    coefficients = [0.0] * len(FEATURES)
-    intercept = math.log((sum(w for w, y in zip(weights, labels) if y == 1) + 0.5) / (sum(w for w, y in zip(weights, labels) if y == 0) + 0.5))
-    learning_rate = 0.08
+    scored = [index for index, entry in enumerate(table) if entry["mean_roc_auc"] is not None]
+    if not scored:
+        return ModelConfig(), {"method": "lot_grouped_cv", "folds": TUNING_FOLDS, "candidates": table, "chosen": None}
+    best = max(scored, key=lambda index: (table[index]["mean_roc_auc"], -index))
+    chosen = configs[best]
+    return chosen, {
+        "method": "lot_grouped_cv_training_lots_only",
+        "folds": TUNING_FOLDS,
+        "metric": "mean fold ROC-AUC, equal class-by-LOT weights",
+        "candidates": table,
+        "chosen": {"feature_set": chosen.spec.name, "l2_strength": chosen.l2},
+    }
 
-    for _ in range(MAX_ITERATIONS):
-        grad_intercept = 0.0
-        grad = [L2_STRENGTH * value for value in coefficients]
-        for vector, label, weight in zip(vectors, labels, weights):
-            error = (_sigmoid(intercept + sum(coef * value for coef, value in zip(coefficients, vector))) - label) * weight / total_weight
-            grad_intercept += error
-            for i, value in enumerate(vector):
-                grad[i] += error * value
-        step = max(abs(grad_intercept), *(abs(value) for value in grad))
-        if step < 1.0e-7:
-            break
-        intercept -= learning_rate * grad_intercept
-        coefficients = [value - learning_rate * derivative for value, derivative in zip(coefficients, grad)]
 
-    return LogisticModel(means, scales, tuple(coefficients), intercept, negative_weight)
+_TUNING_STATE: tuple[tuple[Sample, ...], dict[str, int], list[ModelConfig]] | None = None
+
+
+def _tuning_task(task: tuple[int, int]) -> tuple[int, int, float | None]:
+    config_index, fold = task
+    train, fold_of, configs = _TUNING_STATE
+    config = configs[config_index]
+    fit_rows = [row for row in train if fold_of[row.lot] != fold]
+    held_rows = [row for row in train if fold_of[row.lot] == fold and _usable_label(row)]
+    if not _has_both_classes(fit_rows) or not _has_both_classes(held_rows):
+        return config_index, fold, None
+    try:
+        model = fit_logistic(fit_rows, negative_weight=DEFAULT_NEGATIVE_WEIGHT, l2=config.l2, spec=config.spec)
+    except ValueError:
+        return config_index, fold, None
+    scored = [(row, score) for row in held_rows if (score := model.score(row)) is not None]
+    if not _has_both_classes(row for row, _ in scored):
+        return config_index, fold, None
+    return config_index, fold, _weighted_metrics(scored)["roc_auc"]
+
+
+def _objective(
+    design: Sequence[Sequence[float]], labels: Sequence[int], weights: Sequence[float], beta: Sequence[float], l2: float
+) -> float:
+    loss = 0.0
+    for vector, label, weight in zip(design, labels, weights):
+        margin = sum(b * x for b, x in zip(beta, vector))
+        loss += weight * (_log1p_exp(margin) - label * margin)
+    return loss + 0.5 * l2 * sum(b * b for b in beta[1:])
+
+
+def _log1p_exp(value: float) -> float:
+    if value > 0:
+        return value + math.log1p(math.exp(-value))
+    return math.log1p(math.exp(value))
+
+
+def _solve(matrix: list[list[float]], vector: list[float]) -> list[float]:
+    """Solve a small dense linear system by Gaussian elimination with partial pivoting."""
+    size = len(vector)
+    augmented = [row[:] + [vector[i]] for i, row in enumerate(matrix)]
+    for column in range(size):
+        pivot = max(range(column, size), key=lambda r: abs(augmented[r][column]))
+        if abs(augmented[pivot][column]) < 1.0e-300:
+            raise ValueError("singular Newton system")
+        augmented[column], augmented[pivot] = augmented[pivot], augmented[column]
+        pivot_row = augmented[column]
+        for r in range(column + 1, size):
+            factor = augmented[r][column] / pivot_row[column]
+            if factor:
+                target = augmented[r]
+                for c in range(column, size + 1):
+                    target[c] -= factor * pivot_row[c]
+    solution = [0.0] * size
+    for r in range(size - 1, -1, -1):
+        total = augmented[r][size] - sum(augmented[r][c] * solution[c] for c in range(r + 1, size))
+        solution[r] = total / augmented[r][r]
+    return solution
+
+
+def _spec_values(sample: Sample, spec: FeatureSpec) -> tuple[tuple[float, ...], tuple[float, ...], tuple[str, ...]] | None:
+    if sample.missing_feature_bits:
+        return None
+    numeric: list[float] = []
+    for name in spec.numeric:
+        value = sample.features.get(name)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        number = float(value)
+        if not math.isfinite(number) or number < 0:
+            return None
+        numeric.append(math.log1p(number))
+    flags: list[float] = []
+    for name in spec.flags:
+        value = sample.features.get(name)
+        if not isinstance(value, bool):
+            return None
+        flags.append(1.0 if value else 0.0)
+    categories: list[str] = []
+    for name in spec.categorical:
+        value = sample.key.side if name == "side" else sample.features.get(name)
+        categories.append("" if value is None else str(value))
+    return tuple(numeric), tuple(flags), tuple(categories)
+
+
+def _category_levels(
+    usable: Sequence[tuple[Sample, tuple[tuple[float, ...], tuple[float, ...], tuple[str, ...]]]],
+    weights: Sequence[float],
+    spec: FeatureSpec,
+) -> tuple[tuple[str, ...], ...]:
+    levels = []
+    for index in range(len(spec.categorical)):
+        totals: Counter[str] = Counter()
+        for (_, values), weight in zip(usable, weights):
+            totals[values[2][index]] += weight
+        kept = sorted(level for level, _ in totals.most_common(MAX_CATEGORY_LEVELS))
+        levels.append(tuple(kept))
+    return tuple(levels)
+
+
+def _encode(
+    values: tuple[tuple[float, ...], tuple[float, ...], tuple[str, ...]],
+    spec: FeatureSpec,
+    levels: tuple[tuple[str, ...], ...],
+) -> tuple[float, ...]:
+    numeric, flags, categories = values
+    one_hot: list[float] = []
+    for category, category_levels in zip(categories, levels):
+        one_hot.extend(1.0 if category == level else 0.0 for level in category_levels)
+    return (*numeric, *flags, *one_hot)
+
+
+def _column_names(spec: FeatureSpec, levels: tuple[tuple[str, ...], ...]) -> tuple[str, ...]:
+    names = [*spec.numeric, *spec.flags]
+    for name, category_levels in zip(spec.categorical, levels):
+        names.extend(f"{name}={level}" for level in category_levels)
+    return tuple(names)
 
 
 def _training_weights(
-    samples_and_vectors: Sequence[tuple[Sample, tuple[float, ...]]], negative_weight: float
+    samples_and_vectors: Sequence[tuple[Sample, object]], negative_weight: float
 ) -> tuple[float, ...]:
     base_weights = [
         (1.0 if sample.label == 1 else negative_weight) * sample.weight for sample, _ in samples_and_vectors

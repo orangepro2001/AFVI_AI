@@ -152,6 +152,7 @@ class DashboardTest extends TestCase
                         'average_precision' => ['low' => 0.302, 'high' => 0.517],
                     ],
                 ],
+                'holdout_history' => 'Second evaluation of this held-out LOT set.',
                 'reference' => [
                     'name' => 'log1p_area_total',
                     'metrics' => ['roc_auc' => 0.655],
@@ -160,6 +161,12 @@ class DashboardTest extends TestCase
                 'breakdown' => [
                     'model' => [['name' => '7M99-586', 'rows' => 1200, 'lots' => 4, 'model_roc_auc' => 0.801, 'reference_roc_auc' => 0.702]],
                 ],
+            ],
+            'model' => [
+                'feature_allowlist' => ['area_total', 'light_id'],
+                'feature_set' => 'structured',
+                'l2_strength' => 0.01,
+                'selection' => ['chosen' => ['feature_set' => 'structured', 'l2_strength' => 0.01]],
             ],
             'samples' => [[
                 'key' => ['machine' => 'AFVI13', 'result_group' => 'MODEL/LOT/1', 'strip' => '1', 'side' => 'FC'],
@@ -184,7 +191,9 @@ class DashboardTest extends TestCase
             ->assertSee('0.655')
             ->assertSee('0.041 - 0.212')
             ->assertSee('7M99-586')
-            ->assertSee('0.801 / 0.702');
+            ->assertSee('0.801 / 0.702')
+            ->assertSee('留出集使用记录：Second evaluation of this held-out LOT set.')
+            ->assertSee('特征集 structured · L2 0.01 · 由训练 LOT 分组交叉验证选定');
 
         $this->removeDirectory($directory);
     }

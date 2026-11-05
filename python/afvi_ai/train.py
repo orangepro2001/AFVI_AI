@@ -207,6 +207,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--test-fraction", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--report-sample-limit", type=int, default=MAX_REPORTED_SAMPLES)
+    parser.add_argument(
+        "--tune",
+        action="store_true",
+        help="choose feature set and L2 by LOT-grouped cross-validation on training LOTs only",
+    )
+    parser.add_argument("--tuning-workers", type=int, default=1, help="parallel processes for --tune")
+    parser.add_argument("--holdout-note", help="record how often this held-out LOT set has been evaluated before")
     return parser
 
 
@@ -226,6 +233,8 @@ def main(argv: list[str] | None = None) -> int:
     image_index = None
     if args.manifest is not None:
         image_index = ManifestIndex.load(args.manifest, args.jpg_root, args.image_label)
+    if args.tuning_workers < 1:
+        parser.error("--tuning-workers must be positive")
     if args.max_rows_per_lot_state is not None and args.max_rows_per_lot_state < 1:
         parser.error("--max-rows-per-lot-state must be positive")
     if args.input.is_dir() and args.max_rows_per_lot_state is None:
@@ -263,6 +272,9 @@ def main(argv: list[str] | None = None) -> int:
             seed=args.seed,
             report_sample_limit=args.report_sample_limit,
             sampling=sampling,
+            tune=args.tune,
+            tuning_workers=args.tuning_workers,
+            holdout_history=args.holdout_note,
         )
         write_report(args.output, report)
     except (OSError, TypeError, ValueError) as error:
