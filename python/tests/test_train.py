@@ -69,6 +69,18 @@ class SampledLoaderTests(unittest.TestCase):
 
             self.assertEqual([row.key for row in first], [row.key for row in second])
 
+    def test_same_group_on_two_machines_is_allowed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = record("LOT-A", 1, positive=False)
+            second = dict(first, machine="AFVI14")
+            (root / "a.jsonl").write_text(json.dumps(first) + "\n")
+            (root / "b.jsonl").write_text(json.dumps(second) + "\n")
+
+            samples, _ = load_sampled(input_files(root), max_rows_per_lot_state=5)
+
+            self.assertEqual(sorted(sample.key.machine for sample in samples), ["AFVI13", "AFVI14"])
+
     def test_duplicate_keys_across_files_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -103,19 +103,19 @@ def load_sampled(
     reservoirs: dict[tuple[str, str], list[Any]] = defaultdict(list)
     totals: dict[tuple[str, str], int] = defaultdict(int)
     generators: dict[tuple[str, str], random.Random] = {}
-    group_files: dict[str, Path] = {}
+    group_files: dict[tuple[str, str], Path] = {}
     for path in paths:
-        # Keys contain the result group and one export file holds one group, so duplicates are
-        # checked per file and a group may not reappear in another file. This keeps memory to
+        # Keys contain the machine and result group, and one export file holds one machine's group,
+        # so duplicates are checked per file and a (machine, group) may not reappear in another file. This keeps memory to
         # one file's keys instead of every key of the whole export.
         seen_keys: set[object] = set()
         for sample in _stream((path,), max_line_bytes=max_line_bytes, image_index=image_index, verify_images=verify_images):
             if sample.key in seen_keys:
                 raise ValueError(f"duplicate sample key: {sample.key}")
             seen_keys.add(sample.key)
-            owner = group_files.setdefault(sample.key.result_group, path)
+            owner = group_files.setdefault((sample.key.machine, sample.key.result_group), path)
             if owner != path:
-                raise ValueError(f"result group {sample.key.result_group} appears in {owner} and {path}")
+                raise ValueError(f"result group {sample.key.machine}/{sample.key.result_group} appears in {owner} and {path}")
             _reservoir_add(sample, reservoirs, totals, generators, max_rows_per_lot_state, seed)
     return _finish_sampling(paths, reservoirs, totals, max_rows_per_lot_state)
 
