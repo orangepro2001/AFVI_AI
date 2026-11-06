@@ -23,17 +23,28 @@ from .train import DEFAULT_MAX_LINE_BYTES, _stream, input_files, write_report
 MIN_LOT_POINTS = 200
 SAME_REGIME_RATIO = 1.10
 MIN_CHANGE_RATIO = 1.20
+NEAR_LIMIT_RATIO = 1.25
+MIN_NEAR_LIMIT_SHARE = 0.02
+MIN_EVIDENCE_POINTS = 50
 
 
 def lot_limits(lots: dict[str, LotHistogram], *, min_points: int = MIN_LOT_POINTS) -> dict[str, int]:
-    """Inferred limit (smallest observed area) for LOTs with enough points in this condition."""
+    """Inferred limit (smallest observed area) for LOTs whose size distribution is truncated there.
+
+    A real lower limit leaves many points just above it; a broad distribution of large blobs
+    only has a stray smallest value, so its minimum is not treated as a limit.
+    """
     limits = {}
     for lot, histogram in lots.items():
         keyed_total, other_total = histogram.below(sys.maxsize)
-        if keyed_total + other_total < min_points:
+        total = keyed_total + other_total
+        if total < min_points:
             continue
-        values = [value for value in (*histogram.keyed, *histogram.other)]
-        limits[lot] = min(values)
+        minimum = min(value for value in (*histogram.keyed, *histogram.other))
+        near_keyed, near_other = histogram.below(int(minimum * NEAR_LIMIT_RATIO) + 1)
+        if (near_keyed + near_other) / total < MIN_NEAR_LIMIT_SHARE:
+            continue
+        limits[lot] = minimum
     return limits
 
 
@@ -104,13 +115,10 @@ def analyze(
             for high in groups[low_index + 1 :]:
                 if int(high["limit"]) < int(low["max_limit"]) * MIN_CHANGE_RATIO:
                     continue
-                changes.append(
-                    {
-                        "low_limit": low["limit"],
-                        "high_limit": high["limit"],
-                        **change_evidence(lots, low["lots"], int(high["limit"])),
-                    }
-                )
+                evidence = change_evidence(lots, low["lots"], int(high["limit"]))
+                if int(evidence["points_below"]) < MIN_EVIDENCE_POINTS:
+                    continue
+                changes.append({"low_limit": low["limit"], "high_limit": high["limit"], **evidence})
         if not changes:
             continue
         results.append(
@@ -223,6 +231,9 @@ def main(argv: list[str] | None = None) -> int:
                 "minLotPoints": str(args.min_lot_points),
                 "sameRegimeRatio": str(SAME_REGIME_RATIO),
                 "minChangeRatio": str(MIN_CHANGE_RATIO),
+                "nearLimitRatio": str(NEAR_LIMIT_RATIO),
+                "minNearLimitShare": str(MIN_NEAR_LIMIT_SHARE),
+                "minEvidencePoints": str(MIN_EVIDENCE_POINTS),
                 "byCode": "true" if args.by_code else "false",
             },
         )

@@ -17,6 +17,12 @@ class LimitEvidenceTests(unittest.TestCase):
 
         self.assertEqual(lot_limits(lots, min_points=200), {"A": 30})
 
+    def test_lot_limits_ignore_minimum_of_untruncated_distribution(self):
+        broad = lot({}, {7216: 1, **{value: 3 for value in range(20_000, 90_000, 1000)}})
+        truncated = lot({30: 5}, {30: 50, 31: 40, 80: 300})
+
+        self.assertEqual(lot_limits({"BROAD": broad, "CUT": truncated}, min_points=200), {"CUT": 30})
+
     def test_regimes_group_close_limits(self):
         groups = regimes({"A": 20, "B": 21, "C": 120, "D": 125, "E": 30})
 
