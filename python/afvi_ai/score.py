@@ -58,24 +58,68 @@ def family_evidence(artifact: dict[str, Any]) -> dict[str, dict[str, object]]:
     return evidence
 
 
-def rank_lots(
+def lot_files(paths: tuple[Path, ...]) -> dict[str, list[Path]]:
+    """Group export files by LOT using each file's first record (one export file is one result group)."""
+    groups: dict[str, list[Path]] = defaultdict(list)
+    for path in paths:
+        with Path(path).open("r", encoding="utf-8") as stream:
+            for line in stream:
+                if line.strip():
+                    groups[str(json.loads(line)["lot"])].append(path)
+                    break
+    return dict(groups)
+
+
+def score_lot(
     model: LogisticModel,
-    paths: tuple[Path, ...],
+    files: list[Path],
     *,
     max_line_bytes: int = DEFAULT_MAX_LINE_BYTES,
-) -> tuple[dict[str, list[tuple[float, Any]]], dict[str, int]]:
-    """Score every row; return per-LOT lists sorted by descending score, and unscored counts."""
-    by_lot: dict[str, list[tuple[float, Any]]] = defaultdict(list)
-    unscored: dict[str, int] = defaultdict(int)
-    for sample in _stream(paths, max_line_bytes=max_line_bytes, image_index=None, verify_images=False):
+) -> tuple[list[tuple[float, tuple, str]], dict[str, object]]:
+    """Score one LOT; keep only the CSV fields per point so memory stays proportional to one LOT."""
+    rows: list[tuple[float, tuple, str]] = []
+    families: set[str] = set()
+    unscored = keyed = 0
+    first_at = None
+    for sample in _stream(tuple(files), max_line_bytes=max_line_bytes, image_index=None, verify_images=False):
+        if sample.inspected_at is not None and (first_at is None or sample.inspected_at < first_at):
+            first_at = sample.inspected_at
+        if sample.vrs_observed and sample.label == 1:
+            keyed += 1
         score = model.score(sample)
         if score is None:
-            unscored[sample.lot] += 1
+            unscored += 1
             continue
-        by_lot[sample.lot].append((score, sample))
-    for rows in by_lot.values():
-        rows.sort(key=lambda item: item[0], reverse=True)
-    return by_lot, unscored
+        family = sample.key.result_group.split("/", 1)[0]
+        families.add(family)
+        features = sample.features
+        fields = (
+            sample.key.machine,
+            family,
+            sample.key.result_group,
+            sample.key.strip,
+            sample.key.side,
+            sample.key.unit_idx,
+            sample.key.img_merge_idx,
+            sample.image_ref or "",
+            source_image_path(sample),
+            features.get("area_total"),
+            features.get("length_max"),
+            features.get("width_max"),
+            features.get("light_id"),
+            features.get("sr_metal"),
+            features.get("is_dummy"),
+            sample.ivs_1 if sample.vrs_observed else "",
+        )
+        rows.append((score, fields, family))
+    rows.sort(key=lambda item: item[0], reverse=True)
+    info = {
+        "families": sorted(families),
+        "unscored_points": unscored,
+        "vrs_keyed_points": keyed,
+        "first_inspected_at": first_at.isoformat() if first_at else None,
+    }
+    return rows, info
 
 
 def source_image_path(sample: Any) -> str:
@@ -85,9 +129,8 @@ def source_image_path(sample: Any) -> str:
     return f"ResultData/Data/{sample.key.machine}/{sample.key.result_group}/{sample.image_rel}"
 
 
-def image_saved(share_root: Path | None, sample: Any) -> str:
+def image_saved(share_root: Path | None, relative: str) -> str:
     """Stat (never read) the defect image below the share root; the inspector does not save every image."""
-    relative = source_image_path(sample)
     if share_root is None or not relative:
         return ""
     return "yes" if (share_root / relative).is_file() else "no"
@@ -120,43 +163,26 @@ def main(argv: list[str] | None = None) -> int:
         evidence = family_evidence(artifact)
         training_families = set((artifact.get("metadata") or {}).get("training_families") or [])
         training_lots = set(artifact.get("training_lots") or [])
-        by_lot, unscored = rank_lots(model, input_files(args.input))
         output_dir.mkdir(parents=True, exist_ok=True)
         lots_summary = []
-        for lot in sorted(by_lot):
-            rows = by_lot[lot]
-            families = sorted({sample.key.result_group.split("/", 1)[0] for _, sample in rows})
+        for lot, files in sorted(lot_files(input_files(args.input)).items()):
+            rows, info = score_lot(model, files)
+            families = info["families"]
             path = output_dir / f"{_safe_name(lot)}.csv"
             with path.open("w", newline="", encoding="utf-8-sig") as stream:
                 writer = csv.writer(stream)
                 writer.writerow(CSV_FIELDS)
                 total = len(rows)
-                for rank, (score, sample) in enumerate(rows, start=1):
-                    family = sample.key.result_group.split("/", 1)[0]
+                for rank, (score, fields, family) in enumerate(rows, start=1):
                     family_info = evidence.get(family, {})
-                    features = sample.features
                     writer.writerow(
                         (
                             rank,
                             f"{score:.6f}",
                             f"{100.0 * rank / total:.2f}",
-                            sample.key.machine,
-                            family,
-                            sample.key.result_group,
-                            sample.key.strip,
-                            sample.key.side,
-                            sample.key.unit_idx,
-                            sample.key.img_merge_idx,
-                            sample.image_ref or "",
-                            source_image_path(sample),
-                            image_saved(args.share_root, sample) if rank <= args.check_images else "",
-                            features.get("area_total"),
-                            features.get("length_max"),
-                            features.get("width_max"),
-                            features.get("light_id"),
-                            features.get("sr_metal"),
-                            features.get("is_dummy"),
-                            sample.ivs_1 if sample.vrs_observed else "",
+                            *fields[:9],
+                            image_saved(args.share_root, fields[8]) if rank <= args.check_images else "",
+                            *fields[9:],
                             "yes" if family in training_families else "no",
                             "" if family_info.get("heldout_roc_auc") is None else f"{family_info['heldout_roc_auc']:.3f}",
                             ""
@@ -169,13 +195,16 @@ def main(argv: list[str] | None = None) -> int:
                     "lot": lot,
                     "file": path.name,
                     "scored_points": len(rows),
-                    "unscored_points": unscored.get(lot, 0),
+                    "unscored_points": info["unscored_points"],
+                    "vrs_keyed_points": info["vrs_keyed_points"],
+                    "first_inspected_at": info["first_inspected_at"],
                     "families": families,
                     "lot_in_model_training": lot in training_lots,
                     "families_without_heldout_evidence": [family for family in families if family not in evidence],
                     "families_not_in_training": [family for family in families if family not in training_families],
                 }
             )
+            del rows
         summary = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "model": {"file": args.model.name, "version": artifact.get("version"), "feature_set": artifact["feature_spec"]["name"]},

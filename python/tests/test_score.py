@@ -72,6 +72,8 @@ class ScoreCliTests(unittest.TestCase):
             summary = json.loads((root / "out" / "summary.json").read_text())
             self.assertEqual(summary["lots"][0]["scored_points"], 3)
             self.assertFalse(summary["lots"][0]["lot_in_model_training"])
+            self.assertEqual(summary["lots"][0]["vrs_keyed_points"], 1)
+            self.assertEqual(summary["lots"][0]["first_inspected_at"], "2026-11-10T00:00:00+09:00")
 
     def test_refuses_output_inside_repository(self):
         repository = Path(__file__).resolve().parents[2]
