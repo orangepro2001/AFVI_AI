@@ -34,6 +34,10 @@ The round-2 settings were refit on all 62 labeled LOTs and saved as /home/tony/a
 - Review lists: python -m afvi_ai.score writes one ranked CSV per LOT plus summary.json. Demo output for RH6268036400- (7M99-535, part of the final model's training data) and MGP363046700E (SPFCE300N4.KMA0, a family the model never saw) is in /home/tony/afvi-ai-data/review-demo/out. Only about 1–2% of the top 500 points in these LOTs have a saved defect image; the inspection program does not save every image.
 - Dashboard: https://tony-ai-pc-1.tail9f7f1f.ts.net/afvi_ai shows the evaluation, the review coverage table, and per-family results.
 
+## Parameter draft
+
+python -m afvi_ai.propose writes /home/tony/afvi-ai-data/proposals/afvi-min-defect-area-draft-20261106.xml, marked DRAFT_NOT_FOR_MACHINE_USE. It covers lower limits on area_max per family, side, light, channel and SR/metal: the limit is set on training LOTs within a 0.5% / 1% keyed-loss budget, then checked on held-out LOTs. Of 225 conditions, 6 are candidates (7M99-586 and 7M99-593 only), 8 exceed the budget on held-out LOTs, and 7 are unverified (7M99-460 has no held-out LOTs). Candidate review reductions are only 0–5.6%, so area lower limits are not the main lever against false calls. Observed minimum areas change between training and held-out LOTs in several conditions, which indicates the machine limits were edited between LOTs. The real InspectionSpec.xml files are not on the .203 share, and the mapping to spec keys 1024/1025 and 1002/1011 is unverified.
+
 ## Label findings
 
 - ivs_1 is the operator's key-in code at the review station; "0" means nothing was keyed (PxSpecTool docs/result-data/50-ivs-keyin.md).
@@ -51,7 +55,7 @@ Run commands are in docs/modeling.md. Parameter replay remains a separate gate: 
 
 ## Verification at handoff
 
-- Python unit suite: 51 tests passed.
+- Python unit suite: 58 tests passed.
 - Laravel suite in the composer:2 container (PHP 8.5): 6 tests passed (42 assertions); Pint clean.
 - Go exporter built with go build -mod=mod; the export of 185 groups is logged in exports-20261106-all/export.log.
 

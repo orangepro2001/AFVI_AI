@@ -76,6 +76,16 @@ ResultData/Data/{AFVI13,AFVI14} 下按 model/LOT/group 有限层级盘点出 228
 
 留出 LOT 上按每个 LOT 内分数从高到低复核时，找到的 VRS 打码点比例（LOT 平均）：前 10% 27.5%，前 20% 43.1%，前 30% 57.5%，前 50% 74.8%；仅按面积排序为 13.3%/25.9%/38.8%/61.8%，随机为 10%/20%/30%/50%。前 30% 在 7M99-535/586/593、24FBO060-19、24MSP037-15、25FBO015-15 上为 77%–88%，在 B 系（4SP0223G01、6ST2001Q01、6AN0921I01）上为 25%–44%。
 
+## 参数基准草案（不是设备规格文件）
+
+    PYTHONPATH=python python3 -m afvi_ai.propose --input "$AFVI_DATA_HOME/exports-20261106-production" \
+      --split-report "$AFVI_DATA_HOME/reports/multilot-tuned-v2-20261106.json" \
+      --output "$AFVI_DATA_HOME/proposals/afvi-min-defect-area-draft-<date>.xml"
+
+按型号族 × 面（FC/BC）× light × channel × sr_metal，用全部点（不抽样）统计 area_max（merge 内最大 blob 面积，pixel）。在训练 LOT 上找使 LOT 平均 VRS 打码点损失不超过 0.5% / 1% 的最大下限，再在留出 LOT 上测同一下限。只评估"提高下限"。6 位数字码的型号族自动跳过。recommendation 为 candidate 时才表示留出 LOT 也在预算内。对应的规格项候选为 SpecParameter 1024/1025 Min Defect Size(Pixel)、1002/1011 Bright/Dark Defect Size(Pixel)，对应关系未验证；实际 InspectionSpec.xml 不在 .203 共享上。
+
+2026-11-06 草案：225 个条件中 6 个 candidate（全部在 7M99-586/593），8 个留出超预算不建议，7 个无留出 LOT（7M99-460）未验证，其余维持现状。candidate 的复核点减少只有 0%–5.6%，说明面积下限不是减少误报的主要手段。多个条件中留出 LOT 的最小面积与训练 LOT 不同（如 7M99-586 FC L1 C2 SR2 从 30 变为 5，7M99-593 BC L0 C2 SR2 从 20 变为 120），说明设备下限在 LOT 之间被调整过。
+
 ## 标签语义
 
 ivs_1 是复核站人工键入码（见 PxSpecTool docs/result-data/50-ivs-keyin.md），"0" 表示未键入。ResultData/DLG 列出的是送复核的条带，不是深度学习抽样；在已复核条带内，列表内外的键入率相近（3.8% 与 4.4%）。码表按型号族配置：7M99 系为字母码，FBO/MSP 系为 3–4 位数字，B 系（4SP0223G01、3HN1008O01、6AN0921I01、6ST2001Q01）为 6 位数字（450xxx/850xxx/880xxx/150xxx）。码含义不在 ResultData 中；各族码频次表在 $AFVI_DATA_HOME/inventory/vrs-codes-by-family.csv，留有含义和是否真实不良两列待品质部门填写。B 系在训练 LOT 交叉验证中同样表现弱，标签定义是首要怀疑对象。
