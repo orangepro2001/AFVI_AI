@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\BaselineController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ReviewController;
 use App\Http\Controllers\VisionController;
@@ -14,6 +15,8 @@ $pages = function (string $namePrefix): void {
     Route::get('/review/{lot}/csv', [ReviewController::class, 'download'])
         ->where('lot', '[A-Za-z0-9][A-Za-z0-9._-]*')
         ->name($namePrefix.'review.download');
+    Route::get('/baseline', [BaselineController::class, 'index'])->name($namePrefix.'baseline.index');
+    Route::get('/baseline/model', [BaselineController::class, 'model'])->name($namePrefix.'baseline.model');
     Route::get('/vision', [VisionController::class, 'show'])->name($namePrefix.'vision.show');
     Route::post('/vision', [VisionController::class, 'predict'])->name($namePrefix.'vision.predict');
 };
