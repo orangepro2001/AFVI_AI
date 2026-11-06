@@ -12,7 +12,9 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // The preview container keeps no sessions (SESSION_DRIVER=array), so the upload form
+        // cannot carry a CSRF token; VisionController checks the request origin instead.
+        $middleware->validateCsrfTokens(except: ['vision', 'afvi_ai/vision']);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
