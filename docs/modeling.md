@@ -115,6 +115,42 @@ ResultData/Data/{AFVI13,AFVI14} 下按 model/LOT/group 有限层级盘点出 228
 
 28 个留出 LOT 对 v4 是第三次使用，只作参考；决定性检验是对 2026-11-06 以后的新 LOT 用 afvi_ai.confirm 同时检验 v3 和 v4。
 
+## 网站入口
+
+https://tony-ai-pc-1.tail9f7f1f.ts.net/afvi_ai （tailscale serve 路径 /afvi_ai → 127.0.0.1:18000，路由同时注册在 / 和 /afvi_ai 下）：
+
+- 模型结果（/）：结构化模型评估报告 reports/latest.json。
+- 复核清单（/review）：读取 reports/review/current（指向 v4-20261106）的 summary.json 和每个 LOT 的 CSV；按风险分排序，可按面筛选、隐藏 Dummy、分页、下载完整 CSV；按型号的留出 AUC 标注可信度（≥0.75 强，0.65–0.75 中，<0.65 弱，无证据为未验证）。
+- 图片判断（/vision）：上传缺陷小图（BMP/JPG/PNG，≤2 MB），Laravel 把图片写入 storage/app/vision/inbox（宿主机 /home/tony/afvi-ai-data/laravel-runtime/app/vision），systemd 用户服务 afvi-vision-worker 用图像模型打分后写回 outbox。没有新开网络端口。预览容器不保存会话，所以上传路由不校验 CSRF 令牌，改为校验 Origin/Referer 必须同源。
+
+重新生成复核清单（按 LOT 逐个处理，内存有上限）：
+
+    systemd-run --user --scope -p MemoryMax=4G -p MemorySwapMax=0 env PYTHONPATH=python \
+      python3 -m afvi_ai.score --model "$AFVI_DATA_HOME/models/afvi-risk-v4-20261106.json" \
+      --input "$AFVI_DATA_HOME/exports-20261106-v2-production" --output-dir "$AFVI_DATA_HOME/reports/review/<run>"
+    ln -sfn <run> "$AFVI_DATA_HOME/reports/review/current"
+
+## 图像模型
+
+PyTorch 装在 $AFVI_DATA_HOME/venv-vision（Python 3.12，torch 2.14.1+cu126，GTX 1080 Ti 可用）。经过 VRS 复核的点几乎都保存了缺陷图（约 16.8 万打码、约 500 万未打码）。
+
+    # 1. 采样并缩成 192×192 JPEG（只读 .203 共享，限速 50 MiB/s）
+    systemd-run --user --scope -p MemoryMax=4G -p MemorySwapMax=0 env PYTHONPATH=python \
+      $AFVI_DATA_HOME/venv-vision/bin/python -m afvi_ai.vision.dataset \
+      --input "$AFVI_DATA_HOME/exports-20261106-v2-production" \
+      --split-report "$AFVI_DATA_HOME/reports/multilot-tuned-v2-20261106.json" \
+      --share-root /srv/pxshares/192.168.1.203/pixel --output-dir "$AFVI_DATA_HOME/vision/dataset-<date>" \
+      --per-lot-class 900 --workers 4 --max-mbps 50
+    # 2. 训练（ResNet18 ImageNet 预训练微调；训练 LOT 中留出验证 LOT 做早停和阈值；留出 LOT 只评一次）
+    systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=0 env PYTHONPATH=python \
+      $AFVI_DATA_HOME/venv-vision/bin/python -m afvi_ai.vision.train_image \
+      --dataset "$AFVI_DATA_HOME/vision/dataset-<date>" --output-dir "$AFVI_DATA_HOME/models/vision-<date>" \
+      --report "$AFVI_DATA_HOME/reports/vision/vision-<date>.json"
+    # 3. 启用：models/vision-current → vision-<date>，reports/vision/latest.json → 该报告
+    systemctl --user restart afvi-vision-worker
+
+2026-11-06 数据集：100,833 张（62 个 LOT；训练 58,477 张，留出 42,356 张；缺图 99 张）。所有重任务都用 systemd-run 设内存上限并禁用 swap。
+
 ## 标签语义
 
 ivs_1 是复核站人工键入码（见 PxSpecTool docs/result-data/50-ivs-keyin.md），"0" 表示未键入。ResultData/DLG 列出的是送复核的条带，不是深度学习抽样；在已复核条带内，列表内外的键入率相近（3.8% 与 4.4%）。码表按型号族配置：7M99 系为字母码，FBO/MSP 系为 3–4 位数字，B 系（4SP0223G01、3HN1008O01、6AN0921I01、6ST2001Q01）为 6 位数字（450xxx/850xxx/880xxx/150xxx）。码含义不在 ResultData 中；各族码频次表在 $AFVI_DATA_HOME/inventory/vrs-codes-by-family.csv，留有含义和是否真实不良两列待品质部门填写。B 系在训练 LOT 交叉验证中同样表现弱，标签定义是首要怀疑对象。
