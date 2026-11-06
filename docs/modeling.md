@@ -86,6 +86,35 @@ ResultData/Data/{AFVI13,AFVI14} 下按 model/LOT/group 有限层级盘点出 228
 
 2026-11-06 草案：225 个条件中 6 个 candidate（全部在 7M99-586/593），8 个留出超预算不建议，7 个无留出 LOT（7M99-460）未验证，其余维持现状。candidate 的复核点减少只有 0%–5.6%，说明面积下限不是减少误报的主要手段。多个条件中留出 LOT 的最小面积与训练 LOT 不同（如 7M99-586 FC L1 C2 SR2 从 30 变为 5，7M99-593 BC L0 C2 SR2 从 20 变为 120），说明设备下限在 LOT 之间被调整过。
 
+## 检查代码与成员点（exports v2）
+
+导出器现在为每个 merge point 输出代表点的 code_main/code_sub（哪个检查算法/节点检出）、最小成员面积 area_min，以及 members（每个成员 P 的面积、长宽、light、channel、sr_metal、code）。v2 导出在 $AFVI_DATA_HOME/exports-20261106-v2（生产组链接目录 exports-20261106-v2-production），185 组、11,878,219 行，与 v1 完全一致。light = LIGHT<n>，channel 1/2/3 = R/G/B，sr_metal 1 = SR(NonMetal)、2 = Metal。
+
+## 下限变更证据（自然实验）
+
+    PYTHONPATH=python python3 -m afvi_ai.limits --input "$AFVI_DATA_HOME/exports-20261106-v2-production" --by-code \
+      --output "$AFVI_DATA_HOME/proposals/afvi-limit-change-evidence-bycode-<date>.xml"
+
+同一条件下各 LOT 观测到的最小 area_max 近似该 LOT 实际生效的下限（只取点数 ≥200、且最小值附近有截断堆积的 LOT）。下限相近的 LOT 归为一个区间；在低下限 LOT 中统计落在高下限以下的点和 VRS 打码点，从而同时得到"提高"和"降低"下限的证据。2026-11-06：不分代码 21 个条件、按代码 30 个条件有下限变化。例：7M99-593 FC LIGHT0 G Metal 40→20，低区间占点 66%、打码点 42%、打码率 9.5%（降低有价值）；7M99-586 BC LIGHT2 B SR 30→40，低区间占点 16%、打码点 5.5%（提高代价小）；7M99-593 BC LIGHT0 G Metal 120 与 20 之间占点 88%、打码点 60%（需品质判断）。
+
+## 位置热点
+
+    PYTHONPATH=python python3 -m afvi_ai.hotspots --input "$AFVI_DATA_HOME/exports-20261106-v2-production" \
+      --output "$AFVI_DATA_HOME/proposals/afvi-hotspots-<date>.xml"
+
+把 strip 坐标按 100px 分箱，按数据估计每个 unit 的范围，映射到 unit 内 10×10 相对网格。Dummy 区几乎所有型号打码率 0.0–0.2%，而占点可达 9–24%（23MSP217-49 FC 23.7%、25FBO015-15 FC 14.6%、24FBO060-19 FC 12.3%）。unit 内固定位置的误报集中：25FBO015-15 BC (9,9) 占 29.5%、打码率 0.05%；7M99-593 BC (4,6) 占 15.5%、0.10%；7M99-535 BC (7,0) 占 9.9%、0.02%。这些是 Adjust Mask / Remove Edge 类参数的复核候选。
+
+## v4 候选模型
+
+在 34 个训练 LOT 上 5 折分组交叉验证：size3 0.660，structured 0.736（L2 0.001）/0.747（L2 0.0001），structured_code 0.777/0.779。v4 = structured_code、L2 0.0001，事先由交叉验证选定：
+
+    PYTHONPATH=python python3 -m afvi_ai.train --input "$AFVI_DATA_HOME/exports-20261106-v2-production" \
+      --output "$AFVI_DATA_HOME/reports/multilot-v4-<date>.json" --cutoff 2026-08-15T00:00:00+09:00 \
+      --max-rows-per-lot-state 1500 --max-rows 400000 --seed 0 --feature-set structured_code --l2 0.0001 \
+      --final-model "$AFVI_DATA_HOME/models/afvi-risk-v4-<date>.json"
+
+28 个留出 LOT 对 v4 是第三次使用，只作参考；决定性检验是对 2026-11-06 以后的新 LOT 用 afvi_ai.confirm 同时检验 v3 和 v4。
+
 ## 标签语义
 
 ivs_1 是复核站人工键入码（见 PxSpecTool docs/result-data/50-ivs-keyin.md），"0" 表示未键入。ResultData/DLG 列出的是送复核的条带，不是深度学习抽样；在已复核条带内，列表内外的键入率相近（3.8% 与 4.4%）。码表按型号族配置：7M99 系为字母码，FBO/MSP 系为 3–4 位数字，B 系（4SP0223G01、3HN1008O01、6AN0921I01、6ST2001Q01）为 6 位数字（450xxx/850xxx/880xxx/150xxx）。码含义不在 ResultData 中；各族码频次表在 $AFVI_DATA_HOME/inventory/vrs-codes-by-family.csv，留有含义和是否真实不良两列待品质部门填写。B 系在训练 LOT 交叉验证中同样表现弱，标签定义是首要怀疑对象。

@@ -38,6 +38,14 @@ The round-2 settings were refit on all 62 labeled LOTs and saved as /home/tony/a
 
 python -m afvi_ai.propose writes /home/tony/afvi-ai-data/proposals/afvi-min-defect-area-draft-20261106.xml, marked DRAFT_NOT_FOR_MACHINE_USE. It covers lower limits on area_max per family, side, light, channel and SR/metal: the limit is set on training LOTs within a 0.5% / 1% keyed-loss budget, then checked on held-out LOTs. Of 225 conditions, 6 are candidates (7M99-586 and 7M99-593 only), 8 exceed the budget on held-out LOTs, and 7 are unverified (7M99-460 has no held-out LOTs). Candidate review reductions are only 0–5.6%, so area lower limits are not the main lever against false calls. Observed minimum areas change between training and held-out LOTs in several conditions, which indicates the machine limits were edited between LOTs. The real InspectionSpec.xml files are not on the .203 share, and the mapping to spec keys 1024/1025 and 1002/1011 is unverified.
 
+## Exports v2, limit evidence, hotspots, v4 candidate
+
+- Exports v2 (/home/tony/afvi-ai-data/exports-20261106-v2) add code_main/code_sub, area_min and per-member detections; the group and row counts are the same as v1 (185 groups, 11,878,219 rows).
+- afvi_ai.limits compares LOTs that ran with different effective area limits. Output: proposals/afvi-limit-change-evidence(-bycode)-20261106.xml. Example: 7M99-593 FC LIGHT0 G Metal shows that lowering 40→20 found many keyed points (keyed rate 9.5% in the added range), while 7M99-586 BC LIGHT2 B SR shows that raising 30→40 would cost little (16% of points, 5.5% of keyed).
+- afvi_ai.hotspots maps points onto a unit-relative 10x10 grid. Output: proposals/afvi-hotspots-20261106.xml. Dummy regions hold up to 24% of reviewed points with a keyed rate of 0.0–0.2%, and fixed unit positions such as 25FBO015-15 BC (9,9) and 7M99-593 BC (4,6) collect many false calls.
+- proposals/afvi-min-defect-area-bycode-draft-20261106.xml repeats the minimum-area draft per inspection code (11 candidates).
+- v4 candidate: structured_code (adds code_main, code_sub, area_min), L2 0.0001, chosen by training-LOT CV (0.779 against 0.736 for v3's settings). The final model is models/afvi-risk-v4-20261106.json. Confirm v3 and v4 together on new LOTs.
+
 ## Label findings
 
 - ivs_1 is the operator's key-in code at the review station; "0" means nothing was keyed (PxSpecTool docs/result-data/50-ivs-keyin.md).
@@ -55,7 +63,7 @@ Run commands are in docs/modeling.md. Parameter replay remains a separate gate: 
 
 ## Verification at handoff
 
-- Python unit suite: 58 tests passed.
+- Python unit suite: 65 tests passed; Go exporter tests passed.
 - Laravel suite in the composer:2 container (PHP 8.5): 6 tests passed (42 assertions); Pint clean.
 - Go exporter built with go build -mod=mod; the export of 185 groups is logged in exports-20261106-all/export.log.
 
