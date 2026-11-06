@@ -38,6 +38,7 @@ type sample struct {
 	IVS1               string   `json:"ivs_1"`
 	IVS1Values         []string `json:"ivs_1_values"`
 	MemberCount        int      `json:"member_count"`
+	Members            []member `json:"members"`
 	InspectedAt        string   `json:"inspected_at"`
 	MissingFeatureBits uint32   `json:"missing_feature_bits"`
 }
@@ -59,7 +60,23 @@ type features struct {
 	AreaMax    float64 `json:"area_max"`
 	LengthMax  float64 `json:"length_max"`
 	WidthMax   float64 `json:"width_max"`
+	AreaMin    float64 `json:"area_min"`
+	CodeMain   string  `json:"code_main"`
+	CodeSub    string  `json:"code_sub"`
 	IsDummy    bool    `json:"is_dummy"`
+}
+
+// member is one <P> of a merge point: each detection keeps its own size, light, channel,
+// region and inspection code, so per-detection limits can be analysed.
+type member struct {
+	Area       float64 `json:"area"`
+	Length     float64 `json:"length"`
+	Width      float64 `json:"width"`
+	LightID    int     `json:"light_id"`
+	ChannelIdx int     `json:"channel_idx"`
+	SRMetal    int     `json:"sr_metal"`
+	CodeMain   string  `json:"code_main"`
+	CodeSub    string  `json:"code_sub"`
 }
 
 type naturalKey struct {
@@ -175,8 +192,20 @@ func exportGroup(opts options) ([]sample, error) {
 		}
 		rep := cluster.Rep()
 		ivsValues := make([]string, 0, len(cluster.Members))
+		members := make([]member, 0, len(cluster.Members))
 		for j := range cluster.Members {
-			ivsValues = append(ivsValues, cluster.Point(j).IVS1)
+			p := cluster.Point(j)
+			ivsValues = append(ivsValues, p.IVS1)
+			members = append(members, member{
+				Area:       p.Area,
+				Length:     p.Len,
+				Width:      p.Wid,
+				LightID:    p.Light,
+				ChannelIdx: p.Ch,
+				SRMetal:    p.SRMetal,
+				CodeMain:   p.Main,
+				CodeSub:    p.Sub,
+			})
 		}
 
 		key := naturalKey{machine: opts.machine, group: groupRel, strip: strip.Dir, side: cluster.Side, unit: rep.Unit, merge: rep.Merge}
@@ -203,6 +232,7 @@ func exportGroup(opts options) ([]sample, error) {
 			IVS1:               rep.IVS1,
 			IVS1Values:         ivsValues,
 			MemberCount:        len(cluster.Members),
+			Members:            members,
 			InspectedAt:        inspectionTime(file),
 			MissingFeatureBits: rep.Missing,
 		})
@@ -326,12 +356,16 @@ func clusterFeatures(c *result.Cluster) (features, error) {
 		AreaMax:    rep.Area,
 		LengthMax:  rep.Len,
 		WidthMax:   rep.Wid,
+		AreaMin:    rep.Area,
+		CodeMain:   rep.Main,
+		CodeSub:    rep.Sub,
 		IsDummy:    rep.Unit < 0,
 	}
 	for i := 1; i < len(c.Members); i++ {
 		p := c.Point(i)
 		values = append(values, p.Area, p.Len, p.Wid)
 		row.AreaMax = math.Max(row.AreaMax, p.Area)
+		row.AreaMin = math.Min(row.AreaMin, p.Area)
 		row.LengthMax = math.Max(row.LengthMax, p.Len)
 		row.WidthMax = math.Max(row.WidthMax, p.Wid)
 	}

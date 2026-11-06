@@ -76,6 +76,42 @@ func TestExportKeepsVRSCodeAndParserImageMapping(t *testing.T) {
 	}
 }
 
+func TestExportKeepsMemberDetectionsAndInspectionCodes(t *testing.T) {
+	groupDir := demoGroup(t)
+	rows, err := exportGroup(demoOptions(groupDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("no rows exported")
+	}
+	for _, row := range rows {
+		if len(row.Members) != row.MemberCount {
+			t.Fatalf("members = %d, member_count = %d", len(row.Members), row.MemberCount)
+		}
+		first := row.Members[0]
+		if first.CodeMain != row.Features.CodeMain || first.CodeSub != row.Features.CodeSub {
+			t.Fatalf("representative code %q/%q differs from first member %+v", row.Features.CodeMain, row.Features.CodeSub, first)
+		}
+		if first.LightID != row.Features.LightID || first.ChannelIdx != row.Features.ChannelIdx || first.SRMetal != row.Features.SRMetal {
+			t.Fatalf("representative condition differs from first member: %+v vs %+v", row.Features, first)
+		}
+		minArea, maxArea, total := first.Area, first.Area, 0.0
+		for _, m := range row.Members {
+			if m.Area < minArea {
+				minArea = m.Area
+			}
+			if m.Area > maxArea {
+				maxArea = m.Area
+			}
+			total += m.Area
+		}
+		if row.Features.AreaMin != minArea || row.Features.AreaMax != maxArea || row.Features.AreaTotal != total {
+			t.Fatalf("area summary %+v does not match members %+v", row.Features, row.Members)
+		}
+	}
+}
+
 func TestRawInspectionXMLDoesNotCountAsObservedVRS(t *testing.T) {
 	groupDir := demoGroup(t)
 	rows, err := exportGroup(demoOptions(groupDir))
