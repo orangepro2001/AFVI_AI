@@ -52,6 +52,10 @@ python -m afvi_ai.propose writes /home/tony/afvi-ai-data/proposals/afvi-min-defe
 - Image model: ResNet18 fine-tuned on 100,833 reviewed crops. Held-out ROC-AUC is 0.816 (0.781–0.850); the top 10% / 30% of each LOT holds 59.7% / 81.8% of keyed images; within-context AUC is 0.835. The visual review found confident misses on ball-pad areas, including visible defects, so treat the verdict as a review aid. The worker is the systemd user service afvi-vision-worker; it uses a file queue under laravel-runtime/app/vision and opens no port.
 - Every heavy job runs under systemd-run with MemoryMax and MemorySwapMax=0, so it is killed rather than pushing the host into swap.
 
+## Parameter baseline
+
+/afvi_ai/baseline shows how the production models on FM1 (69), FM2 (41) and BM (60) set each InspectionSpec row: majority value and share, spread and DEFAULT_SPEC. /afvi_ai/baseline/model compares one model with the majority, next to the AI's observed limits for that family. Built by python -m afvi_ai.spec_baseline (read-only; reports/baseline). Strong majorities cover 85–96% of rows used by at least 5 models. DEFAULT_SPEC differs from a strong majority in 16–26 rows per Vision. The data-observed size limits do not yet map to specific spec rows (code_main → CNODE is unresolved; key 1024 exists only on the 1-1-12 DMG node), so the page shows them side by side without claiming a match. The draft and snapshot tools never write to the shares; FM1 was deliberately left untouched.
+
 ## Label findings
 
 - ivs_1 is the operator's key-in code at the review station; "0" means nothing was keyed (PxSpecTool docs/result-data/50-ivs-keyin.md).
