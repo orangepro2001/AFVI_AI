@@ -103,24 +103,52 @@ def load_sampled(
     reservoirs: dict[tuple[str, str], list[Any]] = defaultdict(list)
     totals: dict[tuple[str, str], int] = defaultdict(int)
     generators: dict[tuple[str, str], random.Random] = {}
-    seen_keys: set[object] = set()
-    for sample in _stream(paths, max_line_bytes=max_line_bytes, image_index=image_index, verify_images=verify_images):
-        if sample.key in seen_keys:
-            raise ValueError(f"duplicate sample key: {sample.key}")
-        seen_keys.add(sample.key)
-        stratum = (sample.lot, label_state(sample))
-        totals[stratum] += 1
-        reservoir = reservoirs[stratum]
-        if len(reservoir) < max_rows_per_lot_state:
-            reservoir.append(sample)
-            continue
-        generator = generators.get(stratum)
-        if generator is None:
-            digest = hashlib.sha256(f"{seed}\0{stratum[0]}\0{stratum[1]}".encode("utf-8")).digest()
-            generator = generators[stratum] = random.Random(int.from_bytes(digest[:8], "big"))
-        slot = generator.randrange(totals[stratum])
-        if slot < max_rows_per_lot_state:
-            reservoir[slot] = sample
+    group_files: dict[str, Path] = {}
+    for path in paths:
+        # Keys contain the result group and one export file holds one group, so duplicates are
+        # checked per file and a group may not reappear in another file. This keeps memory to
+        # one file's keys instead of every key of the whole export.
+        seen_keys: set[object] = set()
+        for sample in _stream((path,), max_line_bytes=max_line_bytes, image_index=image_index, verify_images=verify_images):
+            if sample.key in seen_keys:
+                raise ValueError(f"duplicate sample key: {sample.key}")
+            seen_keys.add(sample.key)
+            owner = group_files.setdefault(sample.key.result_group, path)
+            if owner != path:
+                raise ValueError(f"result group {sample.key.result_group} appears in {owner} and {path}")
+            _reservoir_add(sample, reservoirs, totals, generators, max_rows_per_lot_state, seed)
+    return _finish_sampling(paths, reservoirs, totals, max_rows_per_lot_state)
+
+
+def _reservoir_add(
+    sample: Any,
+    reservoirs: dict[tuple[str, str], list[Any]],
+    totals: dict[tuple[str, str], int],
+    generators: dict[tuple[str, str], random.Random],
+    max_rows_per_lot_state: int,
+    seed: int,
+) -> None:
+    stratum = (sample.lot, label_state(sample))
+    totals[stratum] += 1
+    reservoir = reservoirs[stratum]
+    if len(reservoir) < max_rows_per_lot_state:
+        reservoir.append(sample)
+        return
+    generator = generators.get(stratum)
+    if generator is None:
+        digest = hashlib.sha256(f"{seed}\0{stratum[0]}\0{stratum[1]}".encode("utf-8")).digest()
+        generator = generators[stratum] = random.Random(int.from_bytes(digest[:8], "big"))
+    slot = generator.randrange(totals[stratum])
+    if slot < max_rows_per_lot_state:
+        reservoir[slot] = sample
+
+
+def _finish_sampling(
+    paths: tuple[Path, ...],
+    reservoirs: dict[tuple[str, str], list[Any]],
+    totals: dict[tuple[str, str], int],
+    max_rows_per_lot_state: int,
+) -> tuple[tuple[Any, ...], dict[str, object]]:
     samples = []
     for stratum in sorted(reservoirs):
         kept = reservoirs[stratum]
