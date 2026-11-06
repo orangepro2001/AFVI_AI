@@ -140,7 +140,7 @@ https://tony-ai-pc-1.tail9f7f1f.ts.net/afvi_ai （tailscale serve 路径 /afvi_a
 
 只读三台 Vision 的 INSPECT_SPEC（排除复制件、备份、TEST、带空格/括号/韩文的文件夹和 DEFAULT_SPEC）。每个 (LIGHT, 节点, MASTER/SUBMASTER/INSPECTION, 参数键, 通道) 统计：有该行的型号数、节点启用数、通道参与数（INSPECTION 通道值 0 = 该通道不参与）、参与型号中的多数值与占比、中位、10–90%、范围、常见值、DEFAULT_SPEC/Default 的值；并列出每个型号与"强共识"（多数值占比 ≥60%、参与型号 ≥5）不同的地方。网站 /baseline 显示基准，/baseline/model 显示某型号与多数值的对照，并附上该型号族在同一面、同一光源下 AI 从结果数据观察到的实际下限（对应到哪个规格项尚未验证）。
 
-2026-11-07：FM1 69 个、FM2 41 个、BM 60 个生产型号，读取无错误。参与型号 ≥5 的行里，强共识占 FM1 85%、FM2 88%、BM 96%。意见分散的主要是 1024 Min Defect Size（只出现在 1-1-12 DMG 节点）和对位偏移 901/902。DEFAULT_SPEC 与强多数值不同的行：FM1 25、FM2 26、BM 16，例如 FM2 L-Pad 1015 Dark Defect Offset2 Size 多数 200/150 而 DEFAULT 为 15，BM DMG 1024（LIGHT1 R）多数 20 而 DEFAULT 为 200。与多数差别最多的型号：FM1 24msp185-03-00（50 处）、SPFCE300N4.KMA0-00、7M99-631-00、jacson-00、danny-00。
+2026-11-07：FM1 69 个、FM2 41 个、BM 60 个生产型号，读取无错误。DMG 节点（CNODE 12，机台内置的外观 AI 判定，不靠参数；1024 只出现在这里）按噪声处理，不计入。参与型号 ≥5 的行里，强共识占 FM1 85%、FM2 89%、BM 98%；意见分散的主要是对位偏移 901/902 和 Chain Search Range。DEFAULT_SPEC 与强多数值不同的行：FM1 25、FM2 26、BM 15，例如 FM2 L-Pad 1015 Dark Defect Offset2 Size 多数 200/150 而 DEFAULT 为 15，503 Remove SR Edge 多数 6 而 DEFAULT 为 10。与多数差别最多的型号：FM1 24msp185-03-00（50 处）、SPFCE300N4.KMA0-00、7M99-631-00、jacson-00、danny-00。
 
 ## 图像模型
 
