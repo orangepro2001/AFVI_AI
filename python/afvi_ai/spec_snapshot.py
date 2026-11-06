@@ -19,7 +19,9 @@ from xml.etree import ElementTree
 
 from .train import write_report
 
-SIZE_KEYS = ("1024", "1025", "1002", "1011")
+SIZE_KEYS = ("1002", "1011", "1006", "1015")
+NOISE_CNODES = {"12"}
+"""CNODE 12 is DMG, treated as noise (the user, 2026-11-07); key 1024 only appears there."""
 CHANNEL_LETTER = {"1": "R", "2": "G", "3": "B"}
 SIDE_VISIONS = {"FC": (("FM1", "TOP"), ("FM2", "TOP")), "BC": (("BM", "BOTTOM"),)}
 PROPOSED_STATES = {"candidate", "unverified_no_heldout", "do_not_apply_heldout_exceeds_budget"}
@@ -47,6 +49,8 @@ def size_values(spec_file: Path, channel: str) -> list[dict[str, object]]:
     for gp in root.iter("GPNODE"):
         for p in gp.iter("PNODE"):
             for c in p.iter("CNODE"):
+                if c.get("ID") in NOISE_CNODES:
+                    continue
                 for element in c:
                     key = element.get("ParamKey")
                     if element.tag != "INSPECTION" or key not in SIZE_KEYS:
@@ -150,7 +154,8 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "generated_at": datetime.now().astimezone().isoformat(),
                 "side_mapping": "FC -> TOP (FM1, FM2), BC -> BOTTOM (BM); assumed, not verified",
-                "size_keys": {"1024": "Min Defect Size(Pixel)", "1025": "Min Defect Size(Pixel)", "1002": "Bright Defect Size(Pixel)", "1011": "Dark Defect Size(Pixel)"},
+                "size_keys": {"1002": "Bright Defect Size(Pixel)", "1011": "Dark Defect Size(Pixel)", "1006": "Bright Defect Offset2 Size(Pixel)", "1015": "Dark Defect Offset2 Size(Pixel)"},
+                "noise_nodes": "CNODE 12 (DMG) is excluded as noise",
                 "drafts": drafts,
             },
         )

@@ -223,7 +223,7 @@ def to_xml(results: list[dict[str, object]], *, basis: dict[str, str]) -> Elemen
     notes = ElementTree.SubElement(root, "Notes")
     for text in (
         "설비 스펙 파일이 아닙니다. InspectionSpec.xml 에 직접 넣지 마십시오.",
-        "minArea = 각 merge point 의 가장 큰 블롭 면적(area_max, pixel) 하한 후보입니다. 대응 스펙 항목 후보: 1024/1025 Min Defect Size(Pixel), 1002 Bright / 1011 Dark Defect Size(Pixel) — 대응 여부 미검증.",
+        "minArea = 각 merge point 의 가장 큰 블롭 면적(area_max, pixel) 하한 후보입니다. 대응 스펙 항목 후보: 1002 Bright / 1011 Dark Defect Size(Pixel) 계열 — 대응 여부 미검증. 1024 는 DMG 노드 전용이며 DMG 는 노이즈로 취급합니다.",
         "하한을 올리는 방향만 평가 가능합니다. 현재 하한보다 작은 포인트는 데이터에 없습니다.",
         "keyedLoss = VRS 에서 작업자가 코드를 입력한 포인트 중 하한 미만으로 빠지는 비율(LOT 평균). 실제 불량이면 유출됩니다.",
         "train = 학습 LOT 에서 하한을 정함, heldOut = 학습에 쓰지 않은 LOT 에서 같은 하한을 적용한 결과.",

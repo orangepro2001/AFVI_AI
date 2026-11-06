@@ -23,7 +23,7 @@
 
     <div class="notice" role="note">
         <span class="notice-icon">i</span>
-        <div><strong>怎么看：</strong>"多数值"是启用该节点、且该通道参与检查（值不为 0）的型号里最常见的值，后面是占比；占比 ≥ {{ (int) round($share * 100) }}% 视为大家有共识。"不用此通道"是启用节点但该通道填 0 的型号比例。复制件、备份、TEST 型号不计入。点型号名可以看这个型号哪里和多数人不一样。</div>
+        <div><strong>怎么看：</strong>"多数值"是启用该节点、且该通道参与检查（值不为 0）的型号里最常见的值，后面是占比；占比 ≥ {{ (int) round($share * 100) }}% 视为大家有共识。"不用此通道"是启用节点但该通道填 0 的型号比例。复制件、备份、TEST 型号不计入。{{ ! empty($index['noise_nodes']) ? implode('、', array_map(fn ($node) => $node['name'], $index['noise_nodes'])).' 节点（内置外观 AI 判定，不靠参数）按噪声处理，不计入。' : '' }}点型号名可以看这个型号哪里和多数人不一样。</div>
     </div>
 
     @if (! $vision)

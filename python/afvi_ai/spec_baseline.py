@@ -27,6 +27,8 @@ CHANNELS = ("R", "G", "B")
 EXCLUDED_MODEL = re.compile(r"[\s()]|[가-힣]|test|practice|^bk|bk$", re.IGNORECASE)
 CONSENSUS_SHARE = 0.6
 MIN_CONSENSUS_MODELS = 5
+NOISE_NODE_NAMES = ("DMG",)
+"""CNODE names treated as noise (the user, 2026-11-07: DMG is an extremely unimportant parameter)."""
 
 
 def production_models(inspect_spec: Path) -> list[str]:
@@ -105,8 +107,14 @@ def summarize(values: list[float]) -> dict[str, object]:
     }
 
 
+def noise_cnodes(defs: dict[str, object], names: tuple[str, ...] = NOISE_NODE_NAMES) -> set[str]:
+    wanted = {name.lower() for name in names}
+    return {node_id for node_id, name in defs["nodes"]["c"].items() if name.lower() in wanted}
+
+
 def baseline_for_vision(root: Path, side: str, defs: dict[str, object]) -> dict[str, object]:
     inspect_spec = root / "INSPECT_SPEC"
+    noise = noise_cnodes(defs)
     models = production_models(inspect_spec)
     per_light: dict[str, dict[tuple, dict[str, tuple[float | None, bool]]]] = defaultdict(lambda: defaultdict(dict))
     errors = []
@@ -120,6 +128,8 @@ def baseline_for_vision(root: Path, side: str, defs: dict[str, object]) -> dict[
                 continue
             try:
                 for row, value in read_spec(spec).items():
+                    if row[0].rsplit("-", 1)[-1] in noise:
+                        continue
                     per_light[light_dir.name[5:]][row][model] = value
             except (OSError, ElementTree.ParseError) as error:
                 errors.append({"model": model, "light": light_dir.name, "error": str(error)})
@@ -248,7 +258,14 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         defs = definitions(visions[0][1])
-        index = {"generated_at": datetime.now().astimezone().isoformat(), "para_url": args.para_url, "visions": [], "consensus_share": CONSENSUS_SHARE, "min_consensus_models": MIN_CONSENSUS_MODELS}
+        index = {
+            "generated_at": datetime.now().astimezone().isoformat(),
+            "para_url": args.para_url,
+            "visions": [],
+            "consensus_share": CONSENSUS_SHARE,
+            "min_consensus_models": MIN_CONSENSUS_MODELS,
+            "noise_nodes": [{"cnode": node_id, "name": defs["nodes"]["c"][node_id]} for node_id in sorted(noise_cnodes(defs))],
+        }
         for name, root, side in visions:
             result = baseline_for_vision(root, side, defs)
             for light, rows in result["lights"].items():

@@ -43,6 +43,7 @@ class BaselineTest extends TestCase
             'consensus_share' => 0.6,
             'min_consensus_models' => 5,
             'visions' => [['name' => 'BM', 'side' => 'BOTTOM', 'models' => 60, 'lights' => ['0', '2']]],
+            'noise_nodes' => [['cnode' => '12', 'name' => 'DMG']],
         ]);
         $row = fn (string $node, string $key, string $channel, float $mode, float $share, int $active) => [
             'node' => $node, 'node_name' => 'Unit / NonMetal / Space1', 'in_tree' => true, 'tag' => 'INSPECTION', 'key' => $key,
@@ -77,7 +78,8 @@ class BaselineTest extends TestCase
             ->assertSee('Bright Defect Size(Pixel)')
             ->assertSee('밝은 불량 크기')
             ->assertSee('80%')
-            ->assertSee('7M99-586-00');
+            ->assertSee('7M99-586-00')
+            ->assertSee('DMG 节点（内置外观 AI 判定，不靠参数）按噪声处理');
         $this->get('/afvi_ai/baseline?vision=BM&light=2&view=split')->assertOk()->assertSee('Dark Defect(TH)')->assertDontSee('Bright Defect Size(Pixel)');
         $this->get('/baseline?vision=BM&light=2&q=1002')->assertOk()->assertSee('Bright Defect Size(Pixel)')->assertDontSee('Dark Defect(TH)');
     }

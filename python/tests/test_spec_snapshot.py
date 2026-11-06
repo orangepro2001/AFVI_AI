@@ -11,6 +11,9 @@ SPEC = """<?xml version="1.0" encoding="UTF-8"?>
     <PNODE ID="1" NodeCheck="1">
       <CNODE ID="12" NodeCheck="1">
         <INSPECTION ParamKey="1024" ValR="20.0" ValG="0.0" ValB="50.0"/>
+      </CNODE>
+      <CNODE ID="11" NodeCheck="1">
+        <INSPECTION ParamKey="1011" ValR="20.0" ValG="0.0" ValB="50.0"/>
         <INSPECTION ParamKey="1000" ValR="230.0" ValG="0.0" ValB="0.0"/>
       </CNODE>
     </PNODE>
@@ -46,7 +49,7 @@ class SpecSnapshotTests(unittest.TestCase):
             blue = size_values(path, "3")
             green = size_values(path, "2")
 
-            self.assertEqual([(v["key"], v["node"], v["value"]) for v in blue], [("1024", "1-1-12", 50.0), ("1002", "1-2-20", 0.0)])
+            self.assertEqual([(v["key"], v["node"], v["value"]) for v in blue], [("1011", "1-1-11", 50.0), ("1002", "1-2-20", 0.0)])
             self.assertFalse(green[1]["node_enabled"])
             self.assertEqual(green[1]["value"], 7.0)
 
@@ -84,7 +87,8 @@ class SpecSnapshotTests(unittest.TestCase):
             self.assertEqual([entry["machine"] for entry in spec], ["BM"])
             self.assertEqual(spec[0]["model"], "7M99-586-00")
             self.assertEqual(spec[0]["link"], "/afvi/para/#BM/7M99-586-00/2")
-            self.assertEqual(spec[0]["values"][0], {"key": "1024", "node": "1-1-12", "value": 50.0, "node_enabled": True})
+            self.assertEqual(spec[0]["values"][0], {"key": "1011", "node": "1-1-11", "value": 50.0, "node_enabled": True})
+            self.assertFalse(any(value["node"] == "1-1-12" for value in spec[0]["values"]))
 
 
 if __name__ == "__main__":

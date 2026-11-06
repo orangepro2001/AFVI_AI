@@ -10,7 +10,7 @@ DEFS = {
 <pixel><stringpack LangCode="0"><string ParamKey="1024" Text="Min Defect Size(Pixel)"/><string ParamKey="100" Text="Common"/></stringpack>
 <stringpack LangCode="1"><string ParamKey="1024" Text="최소 불량 크기"/></stringpack></pixel>""",
     "SpecTreeNode.xml": """<?xml version="1.0" encoding="UTF-8"?>
-<pixel><gpnode><node ID="1" Name="Unit"/></gpnode><pnode><node ID="2" Name="AU"/></pnode><cnode><node ID="20" Name="C-Pad"/></cnode></pixel>""",
+<pixel><gpnode><node ID="1" Name="Unit"/></gpnode><pnode><node ID="1" Name="Align / ROI"/><node ID="2" Name="AU"/></pnode><cnode><node ID="12" Name="DMG"/><node ID="20" Name="C-Pad"/></cnode></pixel>""",
     "SpecTreeNodeList.xml": """<?xml version="1.0" encoding="UTF-8"?>
 <pixel><system><gpnode ID="1"><pnode ID="2"><cnode ID="20"/></pnode></gpnode></system></pixel>""",
 }
@@ -18,7 +18,9 @@ DEFS = {
 
 def spec(value_r, value_g, master="1.0", enabled="1"):
     return f"""<?xml version="1.0" encoding="UTF-8"?>
-<pixel Version="1.0"><GPNODE ID="1"><PNODE ID="2" NodeCheck="{enabled}"><CNODE ID="20" NodeCheck="1">
+<pixel Version="1.0"><GPNODE ID="1"><PNODE ID="1" NodeCheck="1"><CNODE ID="12" NodeCheck="1">
+<INSPECTION ParamKey="1024" ValR="{value_r}" ValG="7.0" ValB="0.0"/></CNODE></PNODE>
+<PNODE ID="2" NodeCheck="{enabled}"><CNODE ID="20" NodeCheck="1">
 <MASTER ParamKey="100" Val="{master}"/>
 <INSPECTION ParamKey="1024" ValR="{value_r}" ValG="{value_g}" ValB="0.0"/>
 </CNODE></PNODE></GPNODE></pixel>"""
@@ -75,6 +77,9 @@ class SpecBaselineTests(unittest.TestCase):
             self.assertEqual(own["lights"]["1"]["1-2-20|INSPECTION|1024|R"], [35.0, True])
             index = json.loads((root / "out/index.json").read_text())
             self.assertEqual(index["visions"][0]["models"], 6)
+            self.assertFalse(any(row["node"] == "1-1-12" for row in rows))
+            self.assertEqual(index["noise_nodes"], [{"cnode": "12", "name": "DMG"}])
+            self.assertNotIn("1-1-12|INSPECTION|1024|R", own["lights"]["1"])
 
 
 if __name__ == "__main__":
