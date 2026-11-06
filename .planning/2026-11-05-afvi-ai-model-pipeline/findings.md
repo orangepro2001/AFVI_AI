@@ -77,3 +77,13 @@ Obtain or identify more independently labeled production LOTs. First audit their
 - Review coverage (LOT-averaged keyed share found): top 10% 38.0%, 20% 52.0%, 30% 61.6%, 50% 76.6% (v3: 27.5 / 43.1 / 57.5 / 74.8).
 - By model: 7M99-586 0.834, 7M99-593 0.846, 7M99-535 0.802, 24FBO060-19 0.837, 25FBO015-15 0.855; B-series 4SP0223G01 0.590, 6ST2001Q01 0.615, 6AN0921I01 0.666; 7M99-631 0.539 (1 LOT).
 - Settings were fixed by training-LOT CV before this scoring. Treat v4 as the leading candidate; confirm v3 and v4 on post-2026-11-06 LOTs with afvi_ai.confirm.
+
+## Image model (2026-11-06)
+
+- Dataset: 100,833 VRS-reviewed defect crops (p<merge>.bmp → 192×192 JPEG), 62 LOTs, up to 900 per LOT and class; train 58,477 (of which 6 LOTs / 9,908 images are validation), held-out 42,356 from the 28 structured test LOTs.
+- ResNet18 (ImageNet) fine-tuned with LOT-by-class balanced sampling; best epoch 4 of 8 by validation ROC-AUC 0.903 (later epochs overfit).
+- Held-out (first use for the image model): ROC-AUC 0.816 (LOT bootstrap 0.781–0.850), AP 0.830. Review coverage: top 10/20/30/50% find 59.7/74.2/81.8/90.3% of keyed images. At the validation equal-error threshold 0.338, held-out keyed miss is 37.6% and good false alarm 14.4%.
+- By family: 7M99-586 0.931, 7M99-593 0.930, 24MSP037-15 0.939, 22SIP015-07 0.929, 24FBO060-19 0.881, 7M99-535 0.880, 6AN0921I01 0.836, 6ST2001Q01 0.791, 4SP0223G01 0.787, 7M99-631 0.735, 25FBO015-15 0.678.
+- Within-context check on held-out scores (count-weighted): per LOT 0.850; within LOT × code_main 0.834; within LOT × code_main × light × channel × side 0.835. The model is not mainly scoring the detector or region context.
+- Contact sheet (reports/vision/contact-sheet-20261106.png): confident hits and confident false alarms are both fine-pitch finger patterns. The most confident misses are on ball-pad or round-pad areas, mostly B-series with unverified six-digit codes; at least two of them show a visible defect (debris; a stain with a red dot). 192-pixel downscaling can hide small defects. Next improvement: a full-resolution crop around the defect position (img_pt) and the Sub1/Sub2 renderings.
+- Deployment: models/vision-current → vision-20261106; reports/vision/latest.json; systemd user service afvi-vision-worker (file queue, MemoryMax 3G, swap 0). A tailnet upload test scored a keyed SM05 crop 0.926 (defect) and an unkeyed crop 0.177 (good).

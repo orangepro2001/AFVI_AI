@@ -46,6 +46,12 @@ python -m afvi_ai.propose writes /home/tony/afvi-ai-data/proposals/afvi-min-defe
 - proposals/afvi-min-defect-area-bycode-draft-20261106.xml repeats the minimum-area draft per inspection code (11 candidates).
 - v4 candidate: structured_code (adds code_main, code_sub, area_min), L2 0.0001, chosen by training-LOT CV (0.779 against 0.736 for v3's settings). The final model is models/afvi-risk-v4-20261106.json. Confirm v3 and v4 together on new LOTs. On the 28 held-out LOTs (third use, reference only), v4 scores ROC-AUC 0.701 (0.637–0.751) against 0.655 for v3. Its paired advantage over area-only ranking is 0.067–0.205, and the top 10% / 30% of each LOT holds 38.0% / 61.6% of keyed points (v3: 27.5% / 57.5%). The dashboard still shows the pre-registered v3 report.
 
+## Dashboard entries and image model
+
+- https://tony-ai-pc-1.tail9f7f1f.ts.net/afvi_ai has three pages: model results, review lists (/review: v4-ranked points per LOT with per-family trust, filters and CSV download), and image judgment (/vision: upload a defect crop, get defect/good with the model's held-out error rates).
+- Image model: ResNet18 fine-tuned on 100,833 reviewed crops. Held-out ROC-AUC is 0.816 (0.781–0.850); the top 10% / 30% of each LOT holds 59.7% / 81.8% of keyed images; within-context AUC is 0.835. The visual review found confident misses on ball-pad areas, including visible defects, so treat the verdict as a review aid. The worker is the systemd user service afvi-vision-worker; it uses a file queue under laravel-runtime/app/vision and opens no port.
+- Every heavy job runs under systemd-run with MemoryMax and MemorySwapMax=0, so it is killed rather than pushing the host into swap.
+
 ## Label findings
 
 - ivs_1 is the operator's key-in code at the review station; "0" means nothing was keyed (PxSpecTool docs/result-data/50-ivs-keyin.md).
@@ -63,7 +69,7 @@ Run commands are in docs/modeling.md. Parameter replay remains a separate gate: 
 
 ## Verification at handoff
 
-- Python unit suite: 65 tests passed; Go exporter tests passed.
+- Python unit suite: 70 tests (3 PyTorch tests skipped without the vision venv; 4 vision tests pass in venv-vision); Laravel 16 tests; Go exporter tests passed.
 - Laravel suite in the composer:2 container (PHP 8.5): 6 tests passed (42 assertions); Pint clean.
 - Go exporter built with go build -mod=mod; the export of 185 groups is logged in exports-20261106-all/export.log.
 

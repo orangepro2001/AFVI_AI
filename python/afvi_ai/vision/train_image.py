@@ -213,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
             loss = loss_function(model(images.to(device, non_blocking=True)).squeeze(1), labels.to(device))
             loss.backward()
             optimizer.step()
-            total_loss += float(loss)
+            total_loss += loss.item()
             batches += 1
         scheduler.step()
         validation_scores = predict(model, validation_loader, device)
