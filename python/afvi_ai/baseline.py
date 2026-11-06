@@ -55,7 +55,14 @@ STRUCTURED = FeatureSpec(
     ("is_dummy",),
     ("side", "def_side", "light_id", "channel_idx", "sr_metal"),
 )
-FEATURE_SPECS = {spec.name: spec for spec in (SIZE3, STRUCTURED)}
+STRUCTURED_CODE = FeatureSpec(
+    "structured_code",
+    ("area_total", "length_max", "width_max", "area_max", "area_min"),
+    ("is_dummy",),
+    ("side", "def_side", "light_id", "channel_idx", "sr_metal", "code_main", "code_sub"),
+)
+"""Adds the inspection code (which detector fired) and the smallest member blob; needs exports with code_main."""
+FEATURE_SPECS = {spec.name: spec for spec in (SIZE3, STRUCTURED, STRUCTURED_CODE)}
 
 
 @dataclass(frozen=True)
@@ -100,6 +107,7 @@ def build_report(
     tune: bool = False,
     tuning_workers: int = 1,
     holdout_history: str | None = None,
+    config: ModelConfig | None = None,
 ) -> dict[str, object]:
     if not samples:
         raise ValueError("no merge-point samples were loaded")
@@ -116,7 +124,9 @@ def build_report(
     fit_rows = split_train if evaluated else eligible
     fit_lots = {row.lot for row in fit_rows}
     can_fit = _has_both_classes(fit_rows)
-    config = ModelConfig()
+    if tune and config is not None:
+        raise ValueError("choose either tuning or a fixed configuration")
+    config = config or ModelConfig()
     selection: dict[str, object] | None = None
     if tune and evaluated and can_fit:
         config, selection = select_config(split_train, seed=seed, workers=tuning_workers)

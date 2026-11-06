@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 from afvi_ai.baseline import (
     DEFAULT_NEGATIVE_WEIGHT,
     STRUCTURED,
+    STRUCTURED_CODE,
+    ModelConfig,
     review_recall,
     _weighted_metrics,
     build_report,
@@ -249,6 +251,26 @@ class BaselineReportTests(unittest.TestCase):
         self.assertEqual(report["model"]["l2_strength"], selection["chosen"]["l2_strength"])
         self.assertEqual(report["evaluation"]["holdout_history"], "second evaluation of this held-out LOT set")
         json.dumps(report, allow_nan=False)
+
+    def test_fixed_config_with_inspection_codes(self):
+        rows = []
+        for row in self.with_structured_fields(self.make_samples(20, points_per_lot=30)):
+            features = dict(row.features)
+            features.update(area_min=features["area_total"], code_main="10207" if row.label == 1 else "2", code_sub="11")
+            rows.append(replace(row, features=features))
+        report = build_report(
+            tuple(rows),
+            cutoff=self.cutoff,
+            data_source={"export": "fixture.jsonl"},
+            config=ModelConfig(STRUCTURED_CODE, 0.0001),
+        )
+
+        self.assertEqual(report["model"]["feature_set"], "structured_code")
+        self.assertEqual(report["model"]["l2_strength"], 0.0001)
+        self.assertIsNone(report["model"]["selection"])
+        self.assertIn("code_main=10207", report["model"]["coefficients"])
+        with self.assertRaises(ValueError):
+            build_report(tuple(rows), cutoff=self.cutoff, data_source={}, tune=True, config=ModelConfig())
 
     def test_untuned_report_keeps_frozen_size3_config(self):
         report = build_report(

@@ -250,6 +250,8 @@ def _parser() -> argparse.ArgumentParser:
         help="choose feature set and L2 by LOT-grouped cross-validation on training LOTs only",
     )
     parser.add_argument("--tuning-workers", type=int, default=1, help="parallel processes for --tune")
+    parser.add_argument("--feature-set", choices=sorted(FEATURE_SPECS), help="fixed feature set chosen beforehand (no --tune)")
+    parser.add_argument("--l2", type=float, help="fixed L2 strength chosen beforehand; requires --feature-set")
     parser.add_argument("--holdout-note", help="record how often this held-out LOT set has been evaluated before")
     parser.add_argument(
         "--final-model",
@@ -277,6 +279,13 @@ def main(argv: list[str] | None = None) -> int:
         image_index = ManifestIndex.load(args.manifest, args.jpg_root, args.image_label)
     if args.tuning_workers < 1:
         parser.error("--tuning-workers must be positive")
+    if (args.feature_set is None) != (args.l2 is None):
+        parser.error("--feature-set and --l2 must be given together")
+    if args.feature_set is not None and args.tune:
+        parser.error("use either --tune or a fixed --feature-set/--l2")
+    if args.l2 is not None and args.l2 <= 0:
+        parser.error("--l2 must be positive")
+    fixed_config = ModelConfig(FEATURE_SPECS[args.feature_set], args.l2) if args.feature_set else None
     if args.max_rows_per_lot_state is not None and args.max_rows_per_lot_state < 1:
         parser.error("--max-rows-per-lot-state must be positive")
     if args.input.is_dir() and args.max_rows_per_lot_state is None:
@@ -317,6 +326,7 @@ def main(argv: list[str] | None = None) -> int:
             tune=args.tune,
             tuning_workers=args.tuning_workers,
             holdout_history=args.holdout_note,
+            config=fixed_config,
         )
         write_report(args.output, report)
         if args.final_model is not None:

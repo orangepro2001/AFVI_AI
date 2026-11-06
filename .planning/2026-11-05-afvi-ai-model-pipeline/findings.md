@@ -63,3 +63,9 @@ Obtain or identify more independently labeled production LOTs. First audit their
 - Final model: round-2 settings refit on 62 labeled LOTs -> models/afvi-risk-v3-20261106.json. The rerun reproduced the round-2 report exactly. The confirm CLI drops seen LOTs.
 - Training-LOT-only analysis: OOF ROC-AUC 0.729 overall; 7M99-593 0.823, 7M99-586 0.778, 7M99-460 0.694, 24FBO060-19 0.823, 23MSP217-49 0.829, 3HN1008O01 0.803; weak 4SP0223G01 0.478, 24MSP037-15 0.542, 6ST2001Q01 0.266 (2 LOTs, positive rate 0.1%, codes mostly 9998).
 - DLG = strips sent to review; keying rate inside reviewed strips is the same on and off the DLG list. VRS code systems differ by family; the code table is needed to define labels for the numeric systems.
+
+## v4 candidate (2026-11-06, chosen before any held-out scoring)
+
+- Exports v2 (exports-20261106-v2) add code_main/code_sub, area_min and member detections; the same 185 groups and 11,878,219 rows as v1.
+- 5-fold LOT-grouped CV on the 34 training LOTs (mean ROC-AUC): size3 0.660/0.660, structured 0.736/0.747, structured_code 0.777/0.779 for L2 0.001/0.0001. structured_code improves every fold by 0.03-0.06.
+- Chosen for v4: structured_code (structured + log1p(area_min) + one-hot code_main (13 levels) and code_sub (7 levels)), L2 0.0001. The 28-LOT holdout is scored only as a third, labelled use; the decisive test is afvi_ai.confirm on LOTs inspected after 2026-11-06, run for v3 and v4 alike.
