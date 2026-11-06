@@ -28,8 +28,8 @@ DEFAULT_BUDGETS = (0.005, 0.01)
 MIN_TRAIN_LOTS = 3
 MIN_KEYED_POINTS = 50
 
-CellKey = tuple[str, str, str, str, str]
-"""(family, side, light_id, channel_idx, sr_metal)."""
+CellKey = tuple[str, str, str, str, str, str]
+"""(family, side, light_id, channel_idx, sr_metal, code_main); code_main is "" unless split by code."""
 
 
 @dataclass
@@ -56,11 +56,17 @@ class LotHistogram:
         return keyed_prefix[index], other_prefix[index]
 
 
-def aggregate(samples: Iterable[Any]) -> tuple[dict[CellKey, dict[str, LotHistogram]], dict[str, Counter]]:
-    """Exact per-cell, per-LOT histograms of area_max for reviewed points, plus keyed codes per family."""
+def aggregate(
+    samples: Iterable[Any], *, by_code: bool = False
+) -> tuple[dict[CellKey, dict[str, LotHistogram]], dict[str, Counter], dict[str, datetime]]:
+    """Exact per-cell, per-LOT histograms of area_max for reviewed points, keyed codes per family,
+    and each LOT's first inspection time."""
     cells: dict[CellKey, dict[str, LotHistogram]] = defaultdict(dict)
     codes: dict[str, Counter] = defaultdict(Counter)
+    lot_dates: dict[str, datetime] = {}
     for sample in samples:
+        if sample.inspected_at is not None and (sample.lot not in lot_dates or sample.inspected_at < lot_dates[sample.lot]):
+            lot_dates[sample.lot] = sample.inspected_at
         if sample.excluded or not sample.vrs_observed or sample.label not in (0, 1):
             continue
         area = sample.features.get("area_max")
@@ -73,6 +79,7 @@ def aggregate(samples: Iterable[Any]) -> tuple[dict[CellKey, dict[str, LotHistog
             str(sample.features.get("light_id")),
             str(sample.features.get("channel_idx")),
             str(sample.features.get("sr_metal")),
+            str(sample.features.get("code_main") or "") if by_code else "",
         )
         histogram = cells[key].get(sample.lot)
         if histogram is None:
@@ -83,7 +90,7 @@ def aggregate(samples: Iterable[Any]) -> tuple[dict[CellKey, dict[str, LotHistog
             codes[family][sample.ivs_1 or ""] += 1
         else:
             histogram.other[value] += 1
-    return cells, codes
+    return cells, codes, lot_dates
 
 
 def unverified_families(codes: dict[str, Counter]) -> set[str]:
@@ -135,7 +142,7 @@ def propose(
 ) -> list[dict[str, object]]:
     results = []
     for key in sorted(cells):
-        family, side, light, channel, region = key
+        family, side, light, channel, region, code = key
         lots = cells[key]
         train = {lot: histogram for lot, histogram in lots.items() if lot in train_lots}
         test = {lot: histogram for lot, histogram in lots.items() if lot in test_lots}
@@ -150,6 +157,7 @@ def propose(
             "light_id": light,
             "channel_idx": channel,
             "sr_metal": region,
+            "code_main": code,
             "observed_min_area": min(observed) if observed else None,
             "train_observed_min": min(train_observed) if train_observed else None,
             "heldout_observed_min": min(test_observed) if test_observed else None,
@@ -219,7 +227,7 @@ def to_xml(results: list[dict[str, object]], *, basis: dict[str, str]) -> Elemen
         "하한을 올리는 방향만 평가 가능합니다. 현재 하한보다 작은 포인트는 데이터에 없습니다.",
         "keyedLoss = VRS 에서 작업자가 코드를 입력한 포인트 중 하한 미만으로 빠지는 비율(LOT 평균). 실제 불량이면 유출됩니다.",
         "train = 학습 LOT 에서 하한을 정함, heldOut = 학습에 쓰지 않은 LOT 에서 같은 하한을 적용한 결과.",
-        "light/channel/srMetal 은 ResultData 에 기록된 원값입니다(LIGHT 폴더 번호, R/G/B, SR/Metal 대응은 미확인).",
+        "light = LIGHT<n>, channel 1/2/3 = R/G/B, srMetal 1 = SR(NonMetal), 2 = Metal (PxSpecTool result/parse.go 기준).",
         "recommendation: candidate = 올린 하한이 학습에 쓰지 않은 LOT 에서도 손실 예산 안 / unverified_no_heldout = 검증 LOT 없음 / do_not_apply_heldout_exceeds_budget = 검증 LOT 에서 예산 초과 / keep_current_* = 현행 유지.",
         "heldOutObservedMin 이 trainObservedMin 보다 작으면 이후 LOT 에서 설비 하한이 낮아졌을 가능성이 있습니다.",
         "적용 전 같은 프레임·마스크·스펙으로 설비 결과를 재현하는 리플레이 검증과 품질팀의 허용 손실 승인이 필요합니다.",
@@ -239,6 +247,7 @@ def to_xml(results: list[dict[str, object]], *, basis: dict[str, str]) -> Elemen
                     "light": str(entry["light_id"]),
                     "channel": str(entry["channel_idx"]),
                     "srMetal": str(entry["sr_metal"]),
+                    **({"codeMain": str(entry["code_main"])} if entry.get("code_main") else {}),
                     "status": str(entry["status"]),
                     "recommendation": str(entry.get("recommendation", entry["status"])),
                     "recommendedMinArea": "" if entry.get("recommended_min_area") is None else str(entry["recommended_min_area"]),
@@ -283,6 +292,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--split-report", required=True, type=Path, help="evaluation report whose train/test LOT lists are reused")
     parser.add_argument("--output", required=True, type=Path, help="proposal XML destination outside Git")
     parser.add_argument("--budget", type=float, action="append", help="keyed-loss budget; repeatable (default 0.005 and 0.01)")
+    parser.add_argument("--by-code", action="store_true", help="also split conditions by the inspection code_main")
     args = parser.parse_args(argv)
     budgets = tuple(args.budget) if args.budget else DEFAULT_BUDGETS
     if any(not 0 < budget < 1 for budget in budgets):
@@ -295,8 +305,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         report = json.loads(args.split_report.read_text(encoding="utf-8"))
         split = report["evaluation"]["split"]
-        cells, codes = aggregate(
-            _stream(input_files(args.input), max_line_bytes=DEFAULT_MAX_LINE_BYTES, image_index=None, verify_images=False)
+        cells, codes, _ = aggregate(
+            _stream(input_files(args.input), max_line_bytes=DEFAULT_MAX_LINE_BYTES, image_index=None, verify_images=False),
+            by_code=args.by_code,
         )
         skipped = unverified_families(codes)
         results = propose(

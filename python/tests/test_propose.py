@@ -43,8 +43,8 @@ class ProposeTests(unittest.TestCase):
     def test_propose_requires_support_and_reports_held_out_effect(self):
         train = {f"T{i}": lot({20: 100}, {3: 300}) for i in range(3)}
         cells = {
-            ("FAM", "FC", "1", "1", "2"): {**train, "H1": lot({4: 5, 20: 95}, {3: 300})},
-            ("FAM", "BC", "1", "1", "2"): {"T0": lot({20: 100}, {3: 300})},
+            ("FAM", "FC", "1", "1", "2", ""): {**train, "H1": lot({4: 5, 20: 95}, {3: 300})},
+            ("FAM", "BC", "1", "1", "2", ""): {"T0": lot({20: 100}, {3: 300})},
         }
         results = propose(cells, train_lots={"T0", "T1", "T2"}, test_lots={"H1"}, budgets=(0.01,))
 
@@ -59,9 +59,9 @@ class ProposeTests(unittest.TestCase):
     def test_recommendation_requires_held_out_budget(self):
         train = {f"T{i}": lot({20: 100}, {3: 300}) for i in range(3)}
         cells = {
-            ("FAM", "FC", "1", "1", "1"): {**train, "H1": lot({20: 100}, {3: 300})},
-            ("FAM", "FC", "2", "1", "1"): {**train, "H1": lot({4: 5, 20: 95}, {3: 300})},
-            ("FAM", "FC", "3", "1", "1"): dict(train),
+            ("FAM", "FC", "1", "1", "1", ""): {**train, "H1": lot({20: 100}, {3: 300})},
+            ("FAM", "FC", "2", "1", "1", ""): {**train, "H1": lot({4: 5, 20: 95}, {3: 300})},
+            ("FAM", "FC", "3", "1", "1", ""): dict(train),
         }
         results = propose(cells, train_lots={"T0", "T1", "T2"}, test_lots={"H1"}, budgets=(0.01,))
         by_light = {entry["light_id"]: entry for entry in results}
@@ -96,12 +96,18 @@ class ProposeTests(unittest.TestCase):
             )
             for index, (area, observed, code) in enumerate(((7.0, True, "OT12"), (3.0, True, "0"), (5.0, False, None)), start=1)
         ]
-        cells, codes = aggregate(rows)
+        cells, codes, lot_dates = aggregate(rows)
 
-        histogram = cells[("FAM", "FC", "1", "2", "1")]["L1"]
+        histogram = cells[("FAM", "FC", "1", "2", "1", "")]["L1"]
         self.assertEqual(histogram.keyed, Counter({7: 1}))
         self.assertEqual(histogram.other, Counter({3: 1}))
         self.assertEqual(codes["FAM"], Counter({"OT12": 1}))
+        self.assertEqual(lot_dates["L1"].isoformat(), "2026-09-01T00:00:00+09:00")
+        by_code, _, _ = aggregate(
+            [row.__class__(**{**row.__dict__, "features": {**row.features, "code_main": "10207"}}) for row in rows],
+            by_code=True,
+        )
+        self.assertIn(("FAM", "FC", "1", "2", "1", "10207"), by_code)
 
     def test_xml_is_marked_draft_and_lists_conditions(self):
         results = [
