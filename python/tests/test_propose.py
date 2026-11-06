@@ -56,6 +56,22 @@ class ProposeTests(unittest.TestCase):
         self.assertTrue(proposal["raises_limit"])
         self.assertAlmostEqual(proposal["heldout_keyed_loss"], 0.05)
 
+    def test_recommendation_requires_held_out_budget(self):
+        train = {f"T{i}": lot({20: 100}, {3: 300}) for i in range(3)}
+        cells = {
+            ("FAM", "FC", "1", "1", "1"): {**train, "H1": lot({20: 100}, {3: 300})},
+            ("FAM", "FC", "2", "1", "1"): {**train, "H1": lot({4: 5, 20: 95}, {3: 300})},
+            ("FAM", "FC", "3", "1", "1"): dict(train),
+        }
+        results = propose(cells, train_lots={"T0", "T1", "T2"}, test_lots={"H1"}, budgets=(0.01,))
+        by_light = {entry["light_id"]: entry for entry in results}
+
+        self.assertEqual(by_light["1"]["recommendation"], "candidate")
+        self.assertEqual(by_light["1"]["recommended_min_area"], 20)
+        self.assertEqual(by_light["2"]["recommendation"], "do_not_apply_heldout_exceeds_budget")
+        self.assertEqual(by_light["2"]["heldout_observed_min"], 3)
+        self.assertEqual(by_light["3"]["recommendation"], "unverified_no_heldout")
+
     def test_six_digit_code_families_are_flagged(self):
         codes = {"B-SERIES": Counter({"850508": 8, "450142": 4}), "7M99": Counter({"OT12": 9, "EN02": 3})}
 

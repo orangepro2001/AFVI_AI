@@ -142,6 +142,8 @@ def propose(
         train_keyed_lots = [histogram for histogram in train.values() if histogram.totals()[0] > 0]
         train_keyed = sum(histogram.totals()[0] for histogram in train.values())
         observed = [value for histogram in lots.values() for value in (*histogram.keyed, *histogram.other)]
+        train_observed = [value for histogram in train.values() for value in (*histogram.keyed, *histogram.other)]
+        test_observed = [value for histogram in test.values() for value in (*histogram.keyed, *histogram.other)]
         entry: dict[str, object] = {
             "family": family,
             "side": side,
@@ -149,6 +151,8 @@ def propose(
             "channel_idx": channel,
             "sr_metal": region,
             "observed_min_area": min(observed) if observed else None,
+            "train_observed_min": min(train_observed) if train_observed else None,
+            "heldout_observed_min": min(test_observed) if test_observed else None,
             "reviewed_points": sum(sum(h.totals()) for h in lots.values()),
             "keyed_points": sum(h.totals()[0] for h in lots.values()),
             "train_lots_with_keyed": len(train_keyed_lots),
@@ -175,12 +179,27 @@ def propose(
                         "heldout_lots": test_lot_count,
                         "heldout_keyed_loss": test_loss,
                         "heldout_review_reduction": test_reduction,
+                        "heldout_within_budget": None if test_loss is None else test_loss <= budget,
                     }
                 )
             if not any(proposal["raises_limit"] for proposal in entry["proposals"]):
                 entry["status"] = "keep_current_no_safe_increase"
+        entry["recommendation"], entry["recommended_min_area"] = _recommend(entry)
         results.append(entry)
     return results
+
+
+def _recommend(entry: dict[str, object]) -> tuple[str, int | None]:
+    """Candidate only when a raised limit also stayed within its budget on held-out LOTs."""
+    if entry["status"] != "proposed":
+        return str(entry["status"]), None
+    raising = [proposal for proposal in entry["proposals"] if proposal["raises_limit"]]
+    verified = [proposal for proposal in raising if proposal["heldout_within_budget"] is True]
+    if verified:
+        return "candidate", max(int(proposal["min_area"]) for proposal in verified)
+    if any(proposal["heldout_within_budget"] is None for proposal in raising):
+        return "unverified_no_heldout", None
+    return "do_not_apply_heldout_exceeds_budget", None
 
 
 def to_xml(results: list[dict[str, object]], *, basis: dict[str, str]) -> ElementTree.Element:
@@ -201,6 +220,8 @@ def to_xml(results: list[dict[str, object]], *, basis: dict[str, str]) -> Elemen
         "keyedLoss = VRS 에서 작업자가 코드를 입력한 포인트 중 하한 미만으로 빠지는 비율(LOT 평균). 실제 불량이면 유출됩니다.",
         "train = 학습 LOT 에서 하한을 정함, heldOut = 학습에 쓰지 않은 LOT 에서 같은 하한을 적용한 결과.",
         "light/channel/srMetal 은 ResultData 에 기록된 원값입니다(LIGHT 폴더 번호, R/G/B, SR/Metal 대응은 미확인).",
+        "recommendation: candidate = 올린 하한이 학습에 쓰지 않은 LOT 에서도 손실 예산 안 / unverified_no_heldout = 검증 LOT 없음 / do_not_apply_heldout_exceeds_budget = 검증 LOT 에서 예산 초과 / keep_current_* = 현행 유지.",
+        "heldOutObservedMin 이 trainObservedMin 보다 작으면 이후 LOT 에서 설비 하한이 낮아졌을 가능성이 있습니다.",
         "적용 전 같은 프레임·마스크·스펙으로 설비 결과를 재현하는 리플레이 검증과 품질팀의 허용 손실 승인이 필요합니다.",
     ):
         ElementTree.SubElement(notes, "Note").text = text
@@ -219,7 +240,11 @@ def to_xml(results: list[dict[str, object]], *, basis: dict[str, str]) -> Elemen
                     "channel": str(entry["channel_idx"]),
                     "srMetal": str(entry["sr_metal"]),
                     "status": str(entry["status"]),
+                    "recommendation": str(entry.get("recommendation", entry["status"])),
+                    "recommendedMinArea": "" if entry.get("recommended_min_area") is None else str(entry["recommended_min_area"]),
                     "observedMinArea": "" if entry["observed_min_area"] is None else str(entry["observed_min_area"]),
+                    "trainObservedMin": "" if entry.get("train_observed_min") is None else str(entry["train_observed_min"]),
+                    "heldOutObservedMin": "" if entry.get("heldout_observed_min") is None else str(entry["heldout_observed_min"]),
                     "reviewedPoints": str(entry["reviewed_points"]),
                     "keyedPoints": str(entry["keyed_points"]),
                     "trainLotsWithKeyed": str(entry["train_lots_with_keyed"]),
@@ -239,6 +264,9 @@ def to_xml(results: list[dict[str, object]], *, basis: dict[str, str]) -> Elemen
                         "heldOutLots": str(proposal["heldout_lots"]),
                         "heldOutKeyedLoss": _ratio(proposal["heldout_keyed_loss"]),
                         "heldOutReviewReduction": _ratio(proposal["heldout_review_reduction"]),
+                        "heldOutWithinBudget": ""
+                        if proposal.get("heldout_within_budget") is None
+                        else ("true" if proposal["heldout_within_budget"] else "false"),
                     },
                 )
     ElementTree.indent(root, space="  ")
