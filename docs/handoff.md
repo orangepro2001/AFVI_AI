@@ -44,7 +44,7 @@ python -m afvi_ai.propose writes /home/tony/afvi-ai-data/proposals/afvi-min-defe
 - afvi_ai.limits compares LOTs that ran with different effective area limits. Output: proposals/afvi-limit-change-evidence(-bycode)-20261106.xml. Example: 7M99-593 FC LIGHT0 G Metal shows that lowering 40→20 found many keyed points (keyed rate 9.5% in the added range), while 7M99-586 BC LIGHT2 B SR shows that raising 30→40 would cost little (16% of points, 5.5% of keyed).
 - afvi_ai.hotspots maps points onto a unit-relative 10x10 grid. Output: proposals/afvi-hotspots-20261106.xml. Dummy regions hold up to 24% of reviewed points with a keyed rate of 0.0–0.2%, and fixed unit positions such as 25FBO015-15 BC (9,9) and 7M99-593 BC (4,6) collect many false calls.
 - proposals/afvi-min-defect-area-bycode-draft-20261106.xml repeats the minimum-area draft per inspection code (11 candidates).
-- v4 candidate: structured_code (adds code_main, code_sub, area_min), L2 0.0001, chosen by training-LOT CV (0.779 against 0.736 for v3's settings). The final model is models/afvi-risk-v4-20261106.json. Confirm v3 and v4 together on new LOTs.
+- v4 candidate: structured_code (adds code_main, code_sub, area_min), L2 0.0001, chosen by training-LOT CV (0.779 against 0.736 for v3's settings). The final model is models/afvi-risk-v4-20261106.json. Confirm v3 and v4 together on new LOTs. On the 28 held-out LOTs (third use, reference only), v4 scores ROC-AUC 0.701 (0.637–0.751) against 0.655 for v3. Its paired advantage over area-only ranking is 0.067–0.205, and the top 10% / 30% of each LOT holds 38.0% / 61.6% of keyed points (v3: 27.5% / 57.5%). The dashboard still shows the pre-registered v3 report.
 
 ## Label findings
 

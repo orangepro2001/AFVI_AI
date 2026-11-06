@@ -69,3 +69,11 @@ Obtain or identify more independently labeled production LOTs. First audit their
 - Exports v2 (exports-20261106-v2) add code_main/code_sub, area_min and member detections; the same 185 groups and 11,878,219 rows as v1.
 - 5-fold LOT-grouped CV on the 34 training LOTs (mean ROC-AUC): size3 0.660/0.660, structured 0.736/0.747, structured_code 0.777/0.779 for L2 0.001/0.0001. structured_code improves every fold by 0.03-0.06.
 - Chosen for v4: structured_code (structured + log1p(area_min) + one-hot code_main (13 levels) and code_sub (7 levels)), L2 0.0001. The 28-LOT holdout is scored only as a third, labelled use; the decisive test is afvi_ai.confirm on LOTs inspected after 2026-11-06, run for v3 and v4 alike.
+
+## v4 result (third use of the 28-LOT holdout, reference only)
+
+- Report: reports/multilot-v4-20261106.json; final model: models/afvi-risk-v4-20261106.json (62 LOTs, 40 columns).
+- Held-out ROC-AUC 0.701 (LOT bootstrap 0.637-0.751) against v3 0.655; area-only reference 0.560; paired v4-minus-reference difference 0.067-0.205.
+- Review coverage (LOT-averaged keyed share found): top 10% 38.0%, 20% 52.0%, 30% 61.6%, 50% 76.6% (v3: 27.5 / 43.1 / 57.5 / 74.8).
+- By model: 7M99-586 0.834, 7M99-593 0.846, 7M99-535 0.802, 24FBO060-19 0.837, 25FBO015-15 0.855; B-series 4SP0223G01 0.590, 6ST2001Q01 0.615, 6AN0921I01 0.666; 7M99-631 0.539 (1 LOT).
+- Settings were fixed by training-LOT CV before this scoring. Treat v4 as the leading candidate; confirm v3 and v4 on post-2026-11-06 LOTs with afvi_ai.confirm.
