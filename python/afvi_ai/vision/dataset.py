@@ -56,6 +56,36 @@ def source_path(share_root: Path, sample: Any) -> Path:
     return share_root / "ResultData" / "Data" / sample.key.machine / sample.key.result_group / sample.image_rel
 
 
+def source_candidates(
+    sample: Any,
+    *,
+    share_root: Path | None,
+    machine_roots: dict[str, Path] | None = None,
+    caches: dict[str, Path] | None = None,
+) -> list[tuple[Path, bool]]:
+    """Where a point's image may be, best first, each with whether reading it touches a share.
+
+    1. the host's JPEG cache of that machine (pximaged, PxSpecTool docs/features/result-archive-jpg.md §6:
+       ``<cache>/<result_group>/<image_rel>`` with ``.jpg``): local, no share load;
+    2. the BMP on the machine's share (``machine_roots`` names a share root per machine, else ``share_root``);
+    3. the JPEG beside it on the share: a LOT older than five months may have been replaced on the NAS.
+    """
+    machine = sample.key.machine
+    rel = sample.image_rel
+    jpg_rel = rel[:-4] + ".jpg" if rel.lower().endswith(".bmp") else None
+    out: list[tuple[Path, bool]] = []
+    cache = (caches or {}).get(machine)
+    if cache is not None and jpg_rel:
+        out.append((cache / sample.key.result_group / jpg_rel, False))
+    root = (machine_roots or {}).get(machine, share_root)
+    if root is not None:
+        base = root / "ResultData" / "Data" / machine / sample.key.result_group
+        out.append((base / rel, True))
+        if jpg_rel:
+            out.append((base / jpg_rel, True))
+    return out
+
+
 def convert(data: bytes, size: int) -> bytes:
     with Image.open(BytesIO(data)) as image:
         image.load()
@@ -90,17 +120,19 @@ def manifest_row(sample: Any, relative: str, split: str) -> dict[str, object]:
 def build(
     samples: list[Any],
     *,
-    share_root: Path,
+    share_root: Path | None,
     output_dir: Path,
     split_of: dict[str, str],
     size: int = DEFAULT_SIZE,
     workers: int = 4,
     max_mbps: float = DEFAULT_MAX_MBPS,
+    machine_roots: dict[str, Path] | None = None,
+    caches: dict[str, Path] | None = None,
 ) -> dict[str, int]:
     images_dir = output_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
     limiter = RateLimiter(max_mbps * 1024 * 1024)
-    counts = {"written": 0, "existing": 0, "missing": 0, "failed": 0}
+    counts = {"written": 0, "existing": 0, "missing": 0, "failed": 0, "from_cache": 0}
     lock = threading.Lock()
     rows: list[dict[str, object]] = []
 
@@ -109,16 +141,22 @@ def build(
         relative = f"images/{key[:2]}/{key}.jpg"
         destination = output_dir / relative
         status = "existing"
+        cached = False
         if not destination.exists():
-            source = source_path(share_root, sample)
+            candidates = source_candidates(sample, share_root=share_root, machine_roots=machine_roots, caches=caches)
+            source = candidates[0][0] if candidates else Path(sample.image_rel)
             try:
-                if not source.is_file():
+                found = next(((path, shared) for path, shared in candidates if path.is_file()), None)
+                if found is None:
                     status = "missing"
                 else:
+                    source, shared = found
                     length = source.stat().st_size
                     if length > MAX_SOURCE_BYTES:
                         raise ValueError("source image too large")
-                    limiter.consume(length)
+                    if shared:
+                        limiter.consume(length)
+                    cached = not shared
                     encoded = convert(source.read_bytes(), size)
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     temporary = destination.with_suffix(".part")
@@ -130,6 +168,8 @@ def build(
                 print(f"failed {source}: {error}", file=sys.stderr)
         with lock:
             counts[status] += 1
+            if cached and status == "written":
+                counts["from_cache"] += 1
             if status in ("written", "existing"):
                 rows.append(manifest_row(sample, relative, split_of.get(sample.lot, "excluded")))
             done = sum(counts.values())
@@ -146,11 +186,23 @@ def build(
     return counts
 
 
+def _pairs(values: list[str]) -> dict[str, Path]:
+    out: dict[str, Path] = {}
+    for value in values:
+        machine, sep, directory = value.partition("=")
+        if not sep or not machine or not directory:
+            raise ValueError(f"expected MACHINE=DIR, got {value!r}")
+        out[machine] = Path(directory)
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build the downscaled defect-image set for the AFVI image model.")
     parser.add_argument("--input", required=True, type=Path, help="v2 export JSONL file or directory")
     parser.add_argument("--split-report", required=True, type=Path, help="report whose train/test LOT lists define the split")
-    parser.add_argument("--share-root", required=True, type=Path, help="read-only share root containing ResultData")
+    parser.add_argument("--share-root", type=Path, help="read-only share root containing ResultData (machines without --machine-root)")
+    parser.add_argument("--machine-root", action="append", default=[], metavar="MACHINE=DIR", help="share root of one machine; repeatable")
+    parser.add_argument("--cache", action="append", default=[], metavar="MACHINE=DIR", help="pximaged JPEG cache of one machine; repeatable")
     parser.add_argument("--output-dir", required=True, type=Path, help="dataset directory outside Git")
     parser.add_argument("--per-lot-class", type=int, default=DEFAULT_PER_LOT_CLASS)
     parser.add_argument("--size", type=int, default=DEFAULT_SIZE)
@@ -164,6 +216,13 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--output-dir must be outside the Git repository")
     if args.per_lot_class < 1 or args.size < 32 or args.workers < 1 or args.max_mbps <= 0:
         parser.error("invalid limits")
+    try:
+        machine_roots = _pairs(args.machine_root)
+        caches = _pairs(args.cache)
+    except ValueError as error:
+        parser.error(str(error))
+    if args.share_root is None and not machine_roots:
+        parser.error("give --share-root or --machine-root")
 
     report = json.loads(args.split_report.read_text(encoding="utf-8"))
     split = report["evaluation"]["split"]
@@ -184,6 +243,8 @@ def main(argv: list[str] | None = None) -> int:
         size=args.size,
         workers=args.workers,
         max_mbps=args.max_mbps,
+        machine_roots=machine_roots,
+        caches=caches,
     )
     (output_dir / "dataset.json").write_text(
         json.dumps(

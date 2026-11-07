@@ -242,6 +242,13 @@ def write_report(path: Path, report: dict[str, object]) -> None:
             temporary_path.unlink()
 
 
+def _read_lots(path: Path) -> list[str]:
+    lots = [line.strip() for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+    if not lots:
+        raise ValueError(f"{path}: no LOTs")
+    return lots
+
+
 def _cutoff(value: str) -> datetime:
     normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
     try:
@@ -280,6 +287,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--tuning-workers", type=int, default=1, help="parallel processes for --tune")
     parser.add_argument("--feature-set", choices=sorted(FEATURE_SPECS), help="fixed feature set chosen beforehand (no --tune)")
     parser.add_argument("--l2", type=float, help="fixed L2 strength chosen beforehand; requires --feature-set")
+    parser.add_argument(
+        "--test-lots",
+        type=Path,
+        help="file with one LOT per line: exactly these LOTs are held out, every other LOT trains (--cutoff and --test-fraction unused)",
+    )
     parser.add_argument("--holdout-note", help="record how often this held-out LOT set has been evaluated before")
     parser.add_argument(
         "--final-model",
@@ -355,6 +367,7 @@ def main(argv: list[str] | None = None) -> int:
             tuning_workers=args.tuning_workers,
             holdout_history=args.holdout_note,
             config=fixed_config,
+            test_lots=_read_lots(args.test_lots) if args.test_lots is not None else None,
         )
         write_report(args.output, report)
         if args.final_model is not None:

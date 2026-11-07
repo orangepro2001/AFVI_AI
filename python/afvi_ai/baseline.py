@@ -108,13 +108,14 @@ def build_report(
     tuning_workers: int = 1,
     holdout_history: str | None = None,
     config: ModelConfig | None = None,
+    test_lots: Sequence[str] | None = None,
 ) -> dict[str, object]:
     if not samples:
         raise ValueError("no merge-point samples were loaded")
     if report_sample_limit < 1:
         raise ValueError("report_sample_limit must be positive")
 
-    split = split_by_lot_time(samples, cutoff=cutoff, test_fraction=test_fraction, seed=seed)
+    split = split_by_lot_time(samples, cutoff=cutoff, test_fraction=test_fraction, seed=seed, test_lots=test_lots)
     eligible = tuple(row for row in samples if _usable_label(row) and _raw_vector(row) is not None)
     split_train = tuple(row for row in split.train if _usable_label(row) and _raw_vector(row) is not None)
     split_test = tuple(row for row in split.test if _usable_label(row) and _raw_vector(row) is not None)

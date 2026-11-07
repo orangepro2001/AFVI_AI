@@ -25,8 +25,14 @@ def split_by_lot_time(
     cutoff: datetime,
     test_fraction: float = 0.2,
     seed: int = 0,
+    test_lots: Iterable[str] | None = None,
 ) -> SplitResult:
-    """Hold each LOT wholly in one split; LOTs at/after cutoff go wholly to test."""
+    """Hold each LOT wholly in one split; LOTs at/after cutoff go wholly to test.
+
+    With ``test_lots`` the held-out set is exactly those LOTs and every other LOT trains (time and
+    ``test_fraction`` are not used): the automatic retraining holds out the LOTs that arrived since
+    the last run, which are new to the models but not necessarily later in time (a share added later).
+    """
     if not 0 <= test_fraction < 1:
         raise ValueError("test_fraction must be in [0, 1)")
     cutoff_utc = _utc(cutoff)
@@ -35,6 +41,13 @@ def split_by_lot_time(
     grouped: dict[str, list[Sample]] = defaultdict(list)
     for row in rows:
         grouped[row.lot].append(row)
+    if test_lots is not None:
+        held = frozenset(test_lots)
+        test_set = frozenset(lot for lot in grouped if lot in held)
+        train_set = frozenset(lot for lot in grouped if lot not in held)
+        train = _ordered(row for row in rows if row.lot in train_set)
+        test = _ordered(row for row in rows if row.lot in test_set)
+        return SplitResult(train, test, (), train_set, test_set)
 
     test_lots: set[str] = set()
     train_lots: set[str] = set()

@@ -173,6 +173,16 @@ def evaluate(rows: list[dict], scores: list[float], threshold: float, seed: int)
     }
 
 
+def compare_on(model_dir: Path, loader: DataLoader, rows: list[dict], device: torch.device, seed: int) -> dict[str, object]:
+    """The given model on the same held-out rows, at its own threshold (the one it was promoted with)."""
+    info = json.loads((model_dir / "model.json").read_text(encoding="utf-8"))
+    model = build_model(pretrained=False).to(device)
+    model.load_state_dict(torch.load(model_dir / "model.pt", map_location=device))
+    scores = predict(model, loader, device)
+    result = evaluate(rows, scores, float(info["threshold"]["threshold"]), seed)
+    return {"model_dir": str(model_dir.resolve()), **result}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Train the AFVI defect-image model.")
     parser.add_argument("--dataset", required=True, type=Path, help="directory written by afvi_ai.vision.dataset")
@@ -184,6 +194,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--compare-model",
+        type=Path,
+        help="model directory (model.pt + model.json) also scored on the same held-out rows, for the automatic promotion",
+    )
     args = parser.parse_args(argv)
 
     random.seed(args.seed)
@@ -230,6 +245,9 @@ def main(argv: list[str] | None = None) -> int:
     validation_result = evaluate(validation_rows, validation_scores, threshold["threshold"], args.seed)
     test_scores = predict(model, test_loader, device)
     test_result = evaluate(test_rows, test_scores, threshold["threshold"], args.seed)
+    compared = None
+    if args.compare_model is not None:
+        compared = compare_on(args.compare_model, test_loader, test_rows, device, args.seed)
     dataset_info = json.loads((args.dataset / "dataset.json").read_text(encoding="utf-8"))
     metadata = {
         "architecture": "resnet18_imagenet_finetuned",
@@ -251,6 +269,7 @@ def main(argv: list[str] | None = None) -> int:
             "validation": validation_result,
             "held_out": test_result,
             "held_out_note": "Held-out LOTs are the structured evaluation's test LOTs; the image model never trained or tuned on them.",
+            "compared_model_on_held_out": compared,
         },
     )
     print(json.dumps({"best_epoch": best_epoch, "validation_roc_auc": best_auc, "held_out_roc_auc": test_result["metrics"]["roc_auc"]}), flush=True)

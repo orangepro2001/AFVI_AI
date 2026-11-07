@@ -168,3 +168,36 @@ PyTorch 装在 $AFVI_DATA_HOME/venv-vision（Python 3.12，torch 2.14.1+cu126，
 ivs_1 是复核站人工键入码（见 PxSpecTool docs/result-data/50-ivs-keyin.md），"0" 表示未键入。ResultData/DLG 列出的是送复核的条带，不是深度学习抽样；在已复核条带内，列表内外的键入率相近（3.8% 与 4.4%）。码表按型号族配置：7M99 系为字母码，FBO/MSP 系为 3–4 位数字，B 系（4SP0223G01、3HN1008O01、6AN0921I01、6ST2001Q01）为 6 位数字（450xxx/850xxx/880xxx/150xxx）。码含义不在 ResultData 中；各族码频次表在 $AFVI_DATA_HOME/inventory/vrs-codes-by-family.csv，留有含义和是否真实不良两列待品质部门填写。B 系在训练 LOT 交叉验证中同样表现弱，标签定义是首要怀疑对象。
 
 本次实际导出目录是 $AFVI_DATA_HOME/exports-20261106-all，训练输入为只含生产组的符号链接目录 exports-20261106-production。达到门槛只说明对独立历史 LOT 的 VRS 判定有评估结果，不代表生产召回率，也不构成参数优化结论。参数回放仍需先证明固定帧、规格和参数可以复现设备输出。
+
+## 自动再训练（2026-11-07）
+
+使用者：「只要新增数据量开始积累到一定程度就开始做训练」。`python/afvi_ai/auto.py`，每晚 01:30 由 systemd 用户定时器
+`afvi-auto-train.timer` 启动 `afvi-auto-train.service`（单元文件在 `~/.config/systemd/user/`，同 afvi-vision-worker；
+MemoryHigh 8G / MemoryMax 10G / MemorySwapMax=0，CPU/IO 低权重；同一时间只跑一个，锁文件 `$AFVI_DATA_HOME/auto/lock`）。
+
+每次运行：
+
+1. **盘点**：203 的 AFVI13/AFVI14、204 的 AFVI1/AFVI2（`--root HOST=共享根:机台,…`；DLS Monitoring 里 204 的这两个根叫 AFVI 10 / AFVI 11）。
+2. **增量导出**：组文件夹 3 天内没再变化（等复判标签写完）且从没导出过、或导出后又变过的组，用 `afvi-export` 导出到
+   `$AFVI_DATA_HOME/auto/exports/<机台>/<型号>/<LOT>/<组>.jsonl`（老的先导；每次最多 400 组、4 小时，余下的下次接着）。
+   第一次运行把 2026-11-06 的手工导出（exports-20261106-v2-production）链接进来，不重导。
+3. **计数**：每个 LOT 的正例 / 假设良品点数（按导出文件缓存，没变的文件不重读）。正例和良品各 ≥20 点的 LOT 算有标签；
+   不在「已见」名单里的就是新 LOT。已见 = 第一次运行时现用模型的 training_lots + 图片集里的 LOT，之后每次训练把用过的新 LOT 加进去。
+4. **触发**：新 LOT ≥ 5 个（与 `afvi_ai.confirm` 给出判定所需的支持相同）。不够就只记一行日志，下次再看。`--force` 有一个就训练。
+5. **训练**（`$AFVI_DATA_HOME/auto/runs/<时间>/`）：
+   - 现用结构化模型（`models/risk-current`）用 `confirm` 只在这批新 LOT 上评一次；
+   - 候选结构化模型：`train --test-lots new-lots.txt`（留出集 = 恰好这批新 LOT，其余全部训练；特征和 L2 沿用 v4，不再调参，留出集只用一次），
+     并 `--final-model` 在全部有标签 LOT 上重拟合 → `models/afvi-risk-auto-<时间>.json`；
+   - 图片集 `auto/vision-dataset`（跨次保留，已有的图不再读；第一次从 dataset-20261106 硬链接）：先取本机 pximaged 缓存
+     `/var/lib/pximages/<host>-<机台>/…jpg`（DLS Monitoring 右键「이 서버로 JPG 변환」的结果，不读 NAS），再取共享上的 BMP，
+     最后取 NAS 上替换后的 JPG；同一划分训练图像模型 → `models/vision-auto-<时间>`，并用 `--compare-model` 让现用图像模型在同一批留出图上打分。
+6. **启用**：候选在新 LOT 上 ROC-AUC 的 LOT bootstrap 下界 > 0.5，且点估计不低于现用模型在同一批 LOT 上的值，才切换
+   （`models/risk-current`、`models/vision-current` 改指向，图像模型同时更新 `reports/vision/latest.json` 并重启 afvi-vision-worker）；
+   否则候选留在 models/ 旁边，报告在 runs/ 里。复核清单（reports/review/current）不自动重算。
+
+状态 `auto/state.json`，每一步的记录 `auto/log.jsonl`。手动：
+
+    systemctl --user start afvi-auto-train.service          # 立即跑一次（与定时器相同）
+    journalctl --user -u afvi-auto-train -f
+    # 只盘点和计数，不导出不训练：
+    PYTHONPATH=python $AFVI_DATA_HOME/venv-vision/bin/python -m afvi_ai.auto --check --root …（同单元）
